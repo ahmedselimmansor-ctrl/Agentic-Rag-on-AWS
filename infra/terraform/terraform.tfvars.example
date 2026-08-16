@@ -1,0 +1,29 @@
+# Copy to terraform.tfvars and fill in. Never commit the filled version.
+
+project     = "agentic-rag"
+environment = "prod"
+aws_region  = "us-east-1"
+
+# ---- secrets -----------------------------------------------------------
+openai_api_key    = "sk-..."
+dashscope_api_key = "sk-..."
+tavily_api_key    = ""    # leave empty to ship with web search disabled
+
+# ---- models ------------------------------------------------------------
+generation_model   = "gpt-5.6-luna"
+embedding_model    = "tongyi-embedding-vision-flash"
+embedding_dim      = 1024
+rerank_model       = "qwen3-rerank"
+dashscope_base_url = "https://dashscope-intl.aliyuncs.com"
+
+# ---- sizing ------------------------------------------------------------
+db_instance_class     = "db.t4g.medium"
+db_multi_az           = false   # true for production HA
+backend_desired_count = 2
+backend_cpu           = 1024
+backend_memory        = 2048
+
+# ---- custom domain (optional) ------------------------------------------
+# Certificate MUST live in us-east-1 for CloudFront.
+# domain_name         = "rag.example.com"
+# acm_certificate_arn = "arn:aws:acm:us-east-1:123456789012:certificate/..."
