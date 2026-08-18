@@ -27,3 +27,18 @@ backend_memory        = 2048
 # Certificate MUST live in us-east-1 for CloudFront.
 # domain_name         = "rag.example.com"
 # acm_certificate_arn = "arn:aws:acm:us-east-1:123456789012:certificate/..."
+
+# ---- ingestion worker --------------------------------------------------
+worker_desired_count = 1
+worker_min_capacity  = 1    # 0 saves money; the first upload then cold-starts
+worker_max_capacity  = 6
+
+# ---- email -------------------------------------------------------------
+# SES requires a verified identity in this region before it will send.
+email_backend              = "log"   # switch to "ses" once verified
+email_from                 = ""
+require_email_verification = false
+
+# ---- alerts ------------------------------------------------------------
+# AWS emails a subscription confirmation you must click.
+alert_email = ""

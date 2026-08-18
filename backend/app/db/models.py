@@ -63,11 +63,41 @@ class User(Base, UUIDMixin, TimestampMixin):
     # Null for accounts provisioned by an external IdP or by header-auth dev mode.
     password_hash: Mapped[str | None] = mapped_column(String(200))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    email_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     settings_json: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
 
     conversations: Mapped[list[Conversation]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
+    )
+
+
+class OneTimeTokenPurpose(str, enum.Enum):
+    email_verification = "email_verification"
+    password_reset = "password_reset"
+
+
+class OneTimeToken(Base, UUIDMixin, TimestampMixin):
+    """Single-use, time-bounded token for email verification and password reset.
+
+    Stored as a SHA-256 hash for the same reason refresh tokens are: a database
+    leak must not hand over working password-reset links.
+    """
+
+    __tablename__ = "one_time_tokens"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    purpose: Mapped[OneTimeTokenPurpose] = mapped_column(
+        Enum(OneTimeTokenPurpose, name="one_time_token_purpose"), nullable=False
+    )
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (
+        Index("ix_one_time_tokens_user_purpose", "user_id", "purpose", "used_at"),
     )
 
 

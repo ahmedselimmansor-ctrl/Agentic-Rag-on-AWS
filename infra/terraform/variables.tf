@@ -187,3 +187,61 @@ variable "max_uploads_per_hour" {
   type    = number
   default = 60
 }
+
+# --------------------------------------------------------------- worker ----
+variable "worker_cpu" {
+  type    = number
+  default = 1024
+}
+
+variable "worker_memory" {
+  type    = number
+  default = 2048
+}
+
+variable "worker_desired_count" {
+  type    = number
+  default = 1
+}
+
+variable "worker_min_capacity" {
+  description = "Zero is allowed, but the first upload after idle then waits for a cold start."
+  type        = number
+  default     = 1
+}
+
+variable "worker_max_capacity" {
+  type    = number
+  default = 6
+}
+
+variable "ingestion_visibility_timeout" {
+  description = "Must exceed the slowest realistic document, or SQS redelivers a job still in flight."
+  type        = number
+  default     = 900
+}
+
+# ---------------------------------------------------------------- email ----
+variable "email_backend" {
+  description = "ses | log | none. SES requires a verified identity in this region."
+  type        = string
+  default     = "log"
+}
+
+variable "email_from" {
+  description = "Must be an SES-verified address or domain when email_backend = ses."
+  type        = string
+  default     = ""
+}
+
+variable "require_email_verification" {
+  type    = bool
+  default = false
+}
+
+# ------------------------------------------------------------ monitoring ---
+variable "alert_email" {
+  description = "Subscribed to the alerts SNS topic. AWS sends a confirmation you must click."
+  type        = string
+  default     = ""
+}

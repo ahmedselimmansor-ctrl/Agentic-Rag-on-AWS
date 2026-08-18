@@ -68,6 +68,14 @@ async def resolve_user(
         raise _unauthorized("Account no longer exists.")
     if not user.is_active:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "This account is disabled.")
+    if settings.require_email_verification and user.email_verified_at is None:
+        # 403 with a distinct code so the UI can show "confirm your email"
+        # rather than bouncing the user back to a sign-in form they just used.
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Confirm your email address to continue.",
+            headers={"X-Auth-Reason": "email_unverified"},
+        )
     return user
 
 

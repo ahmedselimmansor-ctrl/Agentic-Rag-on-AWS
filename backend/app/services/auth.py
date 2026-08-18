@@ -139,6 +139,22 @@ def refresh_expiry() -> datetime:
     return datetime.now(UTC) + timedelta(days=settings.refresh_token_ttl_days)
 
 
+# -------------------------------------------------------- one-time token ----
+def generate_one_time_token() -> tuple[str, str]:
+    """Returns (plaintext, sha256). The plaintext goes in the emailed link and
+    is never persisted."""
+    raw = secrets.token_urlsafe(32)
+    return raw, hash_refresh_token(raw)
+
+
+def verification_expiry() -> datetime:
+    return datetime.now(UTC) + timedelta(hours=settings.verification_token_ttl_hours)
+
+
+def reset_expiry() -> datetime:
+    return datetime.now(UTC) + timedelta(minutes=settings.reset_token_ttl_minutes)
+
+
 def normalize_email(email: str) -> str:
     email = (email or "").strip().lower()
     if "@" not in email or len(email) > 320 or email.startswith("@") or email.endswith("@"):

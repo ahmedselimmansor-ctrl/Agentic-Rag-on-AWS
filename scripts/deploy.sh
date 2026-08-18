@@ -63,9 +63,19 @@ deploy_backend() {
     --query 'tasks[0].containers[0].exitCode' --output text)"
   [ "$exit_code" = "0" ] || die "Migration failed (exit $exit_code). Check /ecs/*-backend logs; service not updated."
 
-  log "Rolling out the service"
+  log "Rolling out the API service"
   aws ecs update-service --cluster "$CLUSTER" --service "$SERVICE" --force-new-deployment >/dev/null
-  aws ecs wait services-stable --cluster "$CLUSTER" --services "$SERVICE"
+
+  # The worker runs the same image, so it must roll too or it keeps executing
+  # the previous release against the new schema.
+  local worker
+  worker="$(terraform -chdir="$TF_DIR" output -raw worker_service_name 2>/dev/null || true)"
+  if [ -n "$worker" ]; then
+    log "Rolling out the ingestion worker"
+    aws ecs update-service --cluster "$CLUSTER" --service "$worker" --force-new-deployment >/dev/null
+  fi
+
+  aws ecs wait services-stable --cluster "$CLUSTER" --services "$SERVICE" ${worker:+"$worker"}
   log "Backend deployed at :$TAG"
 }
 

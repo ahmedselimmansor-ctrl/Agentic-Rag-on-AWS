@@ -128,6 +128,8 @@ Then `make revision m="resize embedding"`, `make migrate`, and re-upload.
 | `GET` | `/api/documents/{id}` | Poll ingestion status |
 | `DELETE` | `/api/documents/{id}` | Delete document, chunks, and blob |
 | `GET/DELETE` | `/api/memories` | Inspect and forget long-term memory |
+| `POST` | `/api/auth/{register,login,refresh,logout,logout-all}` | Session lifecycle |
+| `POST` | `/api/account/{verify-email,forgot-password,reset-password}` | Account recovery |
 | `GET` | `/api/health/{live,ready}` | Liveness / readiness |
 
 ### Stream protocol
@@ -189,8 +191,15 @@ $150–200/month before model usage. The NAT gateway and RDS dominate; set
 make test
 ```
 
-Covers chunk-boundary and overlap behaviour, RRF ranking, context-budget
-enforcement and priority order, and tool-call reassembly across stream chunks.
+```bash
+cd frontend && npm test
+```
+
+Backend covers chunk-boundary and overlap behaviour, RRF ranking, context-budget
+enforcement and priority order, tool-call reassembly across stream chunks, token
+and password semantics, queue message handling, and email link generation.
+Frontend covers the SSE parser: frames split mid-JSON across network chunks,
+several frames in one chunk, heartbeats, CRLF, and malformed frames.
 
 ## Layout
 
@@ -200,14 +209,17 @@ backend/
     agent/      LangGraph nodes, graph wiring, SSE runner, prompts
     api/        routes + dependencies
     db/         SQLAlchemy models and session
-    services/   parsing, chunking, embeddings, retrieval, rerank, memory, context
+    services/   parsing, chunking, embeddings, retrieval, rerank, memory,
+                context, auth, email, queue, ocr
     tools/      tool schemas, dispatch, web search
+    worker.py   SQS ingestion worker
   alembic/      migrations
 frontend/
   src/
     api/        REST client + SSE parser
-    components/ Sidebar, PromptBox, MessageList, Markdown, SourceDrawer
-    hooks/      useChat (streaming), useUploads (ingestion polling)
+    components/ Sidebar, PromptBox, MessageList, Markdown, SourceDrawer,
+                AuthScreen, PasswordFlows, LibraryPanel
+    hooks/      useChat (streaming), useUploads (ingestion polling), useAuth
 infra/terraform/  VPC, RDS, ECS, ALB, CloudFront, S3, Secrets
 ```
 
@@ -236,6 +248,25 @@ development only; `Settings` refuses it when `ENVIRONMENT` is staging or prod.
 To use Cognito or another OIDC provider instead, replace `resolve_user` in
 [deps.py](backend/app/api/deps.py) — it is the only place identity is read.
 
+### Email verification and password reset
+
+`POST /api/account/{verify-email,resend-verification,forgot-password,reset-password}`.
+
+Tokens are single-use, time-bounded, and stored only as SHA-256 — a database
+leak must not hand over working reset links. Reset windows are deliberately
+shorter than verification windows, because a live reset link sitting in an inbox
+is the more dangerous of the two.
+
+Forgot-password answers identically for known, unknown, and malformed
+addresses. Anything else turns the form into a free membership check for anyone
+holding a list of emails. A successful reset also revokes every refresh token,
+since a reset is the remedy for a compromised account.
+
+Set `EMAIL_BACKEND=log` (the default) and the message — link included — goes to
+the logs, so the whole flow is testable without a verified SES domain. Switch to
+`ses` in production. `REQUIRE_EMAIL_VERIFICATION=true` gates the API on a
+confirmed address.
+
 ### Rate limits
 
 Per user, counted from rows that already exist, so there is no extra write path
@@ -257,13 +288,43 @@ The drift check runs `alembic revision --autogenerate` and fails if it produces
 any operations — that is how a model change with no migration gets caught before
 it reaches a deploy rather than after.
 
+## Ingestion: inline or queued
+
+`INGESTION_MODE=inline` (default) processes uploads in the API process — zero
+infrastructure, right for local dev and small deployments.
+
+`INGESTION_MODE=sqs` hands the job to a dedicated worker (`python -m app.worker`,
+its own ECS service). Embedding a 200-page PDF is minutes of CPU and provider
+latency; in the API process that competes with streaming turns for the event
+loop, and an API deploy mid-ingest loses the job silently.
+
+Details that matter:
+
+- **Delivery is at-least-once**, which is safe because `ingest_document`
+  *replaces* a document's chunks rather than appending. Reprocessing converges
+  instead of duplicating passages.
+- **The worker heartbeats** the message's visibility timeout while a long
+  document is in flight, so a slow file is not redelivered to a second worker.
+- **Enqueue failure degrades to inline** rather than rejecting the upload. A
+  queue outage costs throughput, not documents.
+- **Autoscaling tracks queue depth per worker**, not CPU — a worker blocked on
+  the embedding provider is idle but very much busy.
+- **Anything reaching the DLQ raises an alarm.** Those are documents a user
+  uploaded and will never get an answer from.
+
+## Monitoring
+
+`terraform apply` creates a CloudWatch dashboard and alarms on API 5xx,
+unhealthy targets, p95 latency, RDS CPU / free storage / connections, DLQ depth,
+and ingestion backlog age. Set `alert_email` to subscribe to the SNS topic.
+
 ## Known gaps
 
-- **Ingestion runs in-process** via FastAPI background tasks. Fine to a few
-  hundred documents; past that, move it to SQS + a worker service so a large
-  upload cannot compete with request latency.
 - **OCR needs S3.** Textract reads from a bucket, so scanned PDFs cannot be
   OCR'd with `UPLOAD_BACKEND=local`. Ingestion says so explicitly rather than
   failing opaquely.
-- **No email verification or password reset.** Registration trusts the address
-  as given. Wire in SES before treating an account as a real identity.
+- **No SSO.** Email/password only. `resolve_user` in
+  [deps.py](backend/app/api/deps.py) is the single seam for adding Cognito or
+  another OIDC provider.
+- **The worker has no local queue.** `make up` runs inline ingestion; exercising
+  the SQS path locally needs ElasticMQ or a real queue.

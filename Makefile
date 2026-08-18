@@ -51,6 +51,10 @@ revision: ## Autogenerate a migration: make revision m="add x"
 	@test -n "$(m)" || (echo 'Usage: make revision m="describe the change"' && exit 1)
 	cd $(BACKEND) && alembic revision --autogenerate -m "$(m)" && ruff format alembic/versions
 
+.PHONY: worker
+worker: ## Run the ingestion worker (needs INGESTION_MODE=sqs)
+	cd $(BACKEND) && python -m app.worker
+
 .PHONY: api
 api: ## Run the API on the host with reload
 	cd $(BACKEND) && uvicorn app.main:app --reload --port 8000

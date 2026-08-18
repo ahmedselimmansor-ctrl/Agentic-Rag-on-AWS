@@ -23,13 +23,22 @@ from app.api.deps import CurrentUser, DbSession, UploadUser
 from app.config import settings
 from app.db.models import Conversation, Document, DocumentStatus
 from app.schemas.chat import DocumentOut
-from app.services import storage
+from app.services import queue, storage
 from app.services.ingestion import delete_document, ingest_document
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/documents", tags=["documents"])
 
 IMAGE_PREFIX = "image/"
+
+
+def _schedule_ingestion(document_id: uuid.UUID, background: BackgroundTasks) -> None:
+    """Hand the job to the worker when SQS is configured, otherwise run it in
+    this process. Falling back rather than failing means a queue outage
+    degrades throughput instead of rejecting uploads."""
+    if queue.publish_ingestion(document_id):
+        return
+    background.add_task(ingest_document, document_id)
 
 
 @router.post("", response_model=DocumentOut, status_code=status.HTTP_202_ACCEPTED)
@@ -79,7 +88,7 @@ async def upload_document(
             existing.status = DocumentStatus.pending
             existing.error = None
             await session.commit()
-            background.add_task(ingest_document, existing.id)
+            _schedule_ingestion(existing.id, background)
         return DocumentOut.model_validate(existing)
 
     document = Document(
@@ -110,7 +119,7 @@ async def upload_document(
     result = DocumentOut.model_validate(document)
     # Commit before scheduling: the background task opens its own session.
     await session.commit()
-    background.add_task(ingest_document, document_id)
+    _schedule_ingestion(document_id, background)
     return result
 
 
@@ -173,7 +182,7 @@ async def reingest(
     document.status = DocumentStatus.pending
     document.error = None
     await session.commit()
-    background.add_task(ingest_document, document_id)
+    _schedule_ingestion(document_id, background)
     return document
 
 

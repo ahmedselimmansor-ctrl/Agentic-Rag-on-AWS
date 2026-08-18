@@ -4,7 +4,14 @@ import { MessageList } from './components/MessageList'
 import { PromptBox } from './components/PromptBox'
 import { SourceDrawer } from './components/SourceDrawer'
 import { AuthScreen } from './components/AuthScreen'
-import { AlertIcon, MenuIcon, PlusIcon } from './components/Icons'
+import { LibraryPanel } from './components/LibraryPanel'
+import {
+  ForgotPasswordScreen,
+  ResetPasswordScreen,
+  VerifyEmailScreen,
+  currentRoute,
+} from './components/PasswordFlows'
+import { AlertIcon, FileIcon, MenuIcon, PlusIcon } from './components/Icons'
 import { useAuth } from './hooks/useAuth'
 import { useChat } from './hooks/useChat'
 import { useUploads } from './hooks/useUploads'
@@ -12,6 +19,18 @@ import type { Source } from './types'
 
 export default function App() {
   const auth = useAuth()
+  // Email links land on /verify-email and /reset-password. Both are reachable
+  // while signed out, so they are resolved before the auth gate.
+  const [route, setRoute] = useState(currentRoute)
+  const [forgot, setForgot] = useState(false)
+
+  if (route === 'verify-email') {
+    return <VerifyEmailScreen onDone={() => setRoute('app')} />
+  }
+
+  if (route === 'reset-password') {
+    return <ResetPasswordScreen onDone={() => setRoute('app')} />
+  }
 
   if (auth.status === 'checking') {
     return (
@@ -22,6 +41,7 @@ export default function App() {
   }
 
   if (auth.status === 'anonymous') {
+    if (forgot) return <ForgotPasswordScreen onBack={() => setForgot(false)} />
     return (
       <AuthScreen
         error={auth.error}
@@ -29,6 +49,7 @@ export default function App() {
         onSignIn={auth.signIn}
         onSignUp={auth.signUp}
         onDismissError={() => auth.setError(null)}
+        onForgotPassword={() => setForgot(true)}
       />
     )
   }
@@ -45,6 +66,7 @@ function Workspace({ auth }: { auth: ReturnType<typeof useAuth> }) {
   const [webSearch, setWebSearch] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(() => window.innerWidth >= 900)
   const [activeSource, setActiveSource] = useState<Source | null>(null)
+  const [libraryOpen, setLibraryOpen] = useState(false)
 
   const handleSend = useCallback(
     (text: string) => {
@@ -114,6 +136,14 @@ function Workspace({ auth }: { auth: ReturnType<typeof useAuth> }) {
             <MenuIcon />
           </button>
           <h1 className="topbar-title">{activeTitle}</h1>
+          <button
+            className="icon-btn"
+            onClick={() => setLibraryOpen(true)}
+            aria-label="Documents and memory"
+            title="Documents and memory"
+          >
+            <FileIcon size={16} />
+          </button>
           <button className="icon-btn" onClick={handleNew} aria-label="New chat" title="New chat (⌘K)">
             <PlusIcon size={17} />
           </button>
@@ -166,6 +196,7 @@ function Workspace({ auth }: { auth: ReturnType<typeof useAuth> }) {
       </main>
 
       <SourceDrawer source={activeSource} onClose={() => setActiveSource(null)} />
+      <LibraryPanel open={libraryOpen} onClose={() => setLibraryOpen(false)} />
     </div>
   )
 }

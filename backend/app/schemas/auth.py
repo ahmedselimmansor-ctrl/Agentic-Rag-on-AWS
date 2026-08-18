@@ -24,6 +24,23 @@ class RefreshRequest(BaseModel):
     refresh_token: str = Field(min_length=1, max_length=400)
 
 
+class VerifyEmailRequest(BaseModel):
+    token: str = Field(min_length=1, max_length=400)
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: str = Field(max_length=320)
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str = Field(min_length=1, max_length=400)
+    password: str = Field(min_length=1, max_length=200)
+
+
+class MessageOut(BaseModel):
+    message: str
+
+
 class UserOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -32,6 +49,7 @@ class UserOut(BaseModel):
     display_name: str | None = None
     created_at: datetime
     last_login_at: datetime | None = None
+    email_verified_at: datetime | None = None
 
 
 class AuthTokens(BaseModel):

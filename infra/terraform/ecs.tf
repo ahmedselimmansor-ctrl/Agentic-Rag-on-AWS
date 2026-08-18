@@ -97,6 +97,25 @@ resource "aws_iam_role" "task" {
   })
 }
 
+resource "aws_iam_role_policy" "task_ses" {
+  count = var.email_backend == "ses" ? 1 : 0
+
+  name = "send-email"
+  role = aws_iam_role.task.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = ["ses:SendEmail", "ses:SendRawEmail"]
+      Resource = "*"
+      Condition = {
+        StringEquals = { "ses:FromAddress" = var.email_from }
+      }
+    }]
+  })
+}
+
 resource "aws_iam_role_policy" "task_s3" {
   name = "uploads-bucket"
   role = aws_iam_role.task.id
@@ -139,6 +158,15 @@ locals {
     { name = "ALLOW_REGISTRATION", value = tostring(var.allow_registration) },
     { name = "MAX_MESSAGES_PER_HOUR", value = tostring(var.max_messages_per_hour) },
     { name = "MAX_UPLOADS_PER_HOUR", value = tostring(var.max_uploads_per_hour) },
+    { name = "INGESTION_MODE", value = "sqs" },
+    { name = "INGESTION_QUEUE_URL", value = aws_sqs_queue.ingestion.url },
+    { name = "EMAIL_BACKEND", value = var.email_backend },
+    { name = "EMAIL_FROM", value = var.email_from },
+    { name = "REQUIRE_EMAIL_VERIFICATION", value = tostring(var.require_email_verification) },
+    {
+      name  = "APP_BASE_URL"
+      value = var.domain_name != "" ? "https://${var.domain_name}" : "https://${aws_cloudfront_distribution.main.domain_name}"
+    },
     {
       name  = "CORS_ORIGINS"
       value = var.domain_name != "" ? "https://${var.domain_name}" : "https://${aws_cloudfront_distribution.main.domain_name}"

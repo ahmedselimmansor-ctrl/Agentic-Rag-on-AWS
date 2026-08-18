@@ -44,6 +44,26 @@ class Settings(BaseSettings):
     allow_registration: bool = True
     password_min_length: int = 10
 
+    # ---------------------------------------------------------------- email --
+    # "ses" sends for real; "log" writes the message to the logs, which is what
+    # local dev wants and what keeps the flow testable without a verified domain.
+    email_backend: Literal["ses", "log", "none"] = "log"
+    email_from: str = "no-reply@example.com"
+    email_from_name: str = "Agentic RAG"
+    app_base_url: str = "http://localhost:5173"
+    require_email_verification: bool = False
+    verification_token_ttl_hours: int = 24
+    reset_token_ttl_minutes: int = 60
+
+    # ------------------------------------------------------------ ingestion --
+    # "inline" runs in the API process; "sqs" hands off to the worker service.
+    ingestion_mode: Literal["inline", "sqs"] = "inline"
+    ingestion_queue_url: str = ""
+    ingestion_batch_size: int = 1
+    # Must exceed the slowest realistic document, or SQS redelivers a job that
+    # is still being worked on.
+    ingestion_visibility_timeout: int = 900
+
     # --------------------------------------------------------- rate limits --
     # Counted from existing rows, so no extra write path and accurate across tasks.
     max_messages_per_hour: int = 120

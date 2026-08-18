@@ -6,10 +6,11 @@ import logging
 import uuid
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, HTTPException, Request, Response, status
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, Response, status
 from sqlalchemy import func, select, update
 
 from app.api.deps import CurrentUser, DbSession
+from app.api.routes.account import issue_verification
 from app.config import settings
 from app.db.models import RefreshToken, User
 from app.schemas.auth import (
@@ -35,6 +36,7 @@ async def register(
     payload: RegisterRequest,
     request: Request,
     session: DbSession,
+    background: BackgroundTasks,
 ) -> AuthTokens:
     if not settings.allow_registration:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Registration is disabled.")
@@ -69,6 +71,8 @@ async def register(
     # created_at/updated_at come from server defaults. Without this refresh the
     # response model triggers a lazy load, which cannot run in async context.
     await session.refresh(user)
+
+    await issue_verification(session, user, background)
 
     return await _issue_tokens(session, user, request)
 

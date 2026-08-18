@@ -7,6 +7,7 @@ interface AuthScreenProps {
   onSignIn: (email: string, password: string) => Promise<boolean>
   onSignUp: (email: string, password: string, displayName?: string) => Promise<boolean>
   onDismissError: () => void
+  onForgotPassword: () => void
 }
 
 const MIN_PASSWORD = 10
@@ -17,6 +18,7 @@ export function AuthScreen({
   onSignIn,
   onSignUp,
   onDismissError,
+  onForgotPassword,
 }: AuthScreenProps) {
   const [mode, setMode] = useState<'signin' | 'signup'>('signin')
   const [email, setEmail] = useState('')
@@ -108,6 +110,12 @@ export function AuthScreen({
               </small>
             )}
           </label>
+
+          {!isSignUp && (
+            <button type="button" className="auth-link" onClick={onForgotPassword}>
+              Forgot your password?
+            </button>
+          )}
 
           <button type="submit" className="auth-submit" disabled={!canSubmit}>
             {busy ? 'Working…' : isSignUp ? 'Create account' : 'Sign in'}
