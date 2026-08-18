@@ -3,12 +3,41 @@ import { Sidebar } from './components/Sidebar'
 import { MessageList } from './components/MessageList'
 import { PromptBox } from './components/PromptBox'
 import { SourceDrawer } from './components/SourceDrawer'
+import { AuthScreen } from './components/AuthScreen'
 import { AlertIcon, MenuIcon, PlusIcon } from './components/Icons'
+import { useAuth } from './hooks/useAuth'
 import { useChat } from './hooks/useChat'
 import { useUploads } from './hooks/useUploads'
 import type { Source } from './types'
 
 export default function App() {
+  const auth = useAuth()
+
+  if (auth.status === 'checking') {
+    return (
+      <div className="auth">
+        <div className="loading">Restoring your session…</div>
+      </div>
+    )
+  }
+
+  if (auth.status === 'anonymous') {
+    return (
+      <AuthScreen
+        error={auth.error}
+        busy={auth.busy}
+        onSignIn={auth.signIn}
+        onSignUp={auth.signUp}
+        onDismissError={() => auth.setError(null)}
+      />
+    )
+  }
+
+  // Remount on identity change so no previous user's state can survive.
+  return <Workspace key={auth.user?.id ?? 'anon'} auth={auth} />
+}
+
+function Workspace({ auth }: { auth: ReturnType<typeof useAuth> }) {
   const chat = useChat()
   const uploads = useUploads(chat.conversationId)
 
@@ -70,6 +99,9 @@ export default function App() {
         onSelect={handleSelect}
         onDelete={(id) => void chat.deleteConversation(id)}
         onRename={(id, title) => void chat.renameConversation(id, title)}
+        userEmail={auth.user?.email ?? ''}
+        userName={auth.user?.display_name ?? null}
+        onSignOut={() => void auth.signOut()}
       />
 
       <main className="main">

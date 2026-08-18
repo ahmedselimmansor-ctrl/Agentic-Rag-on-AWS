@@ -1,4 +1,5 @@
-import { API_BASE, identityHeaders } from './client'
+import { API_BASE } from './client'
+import { authHeaders, refreshAccessToken } from './auth'
 import type { Attachment, Source, ToolTraceEntry, Usage } from '@/types'
 
 /**
@@ -37,23 +38,47 @@ export async function streamChat(
   { message, conversationId, attachments = [], webSearch = false, signal }: ChatStreamRequest,
   handlers: StreamHandlers,
 ): Promise<void> {
-  const response = await fetch(`${API_BASE}/chat`, {
-    method: 'POST',
-    headers: { ...identityHeaders(), 'Content-Type': 'application/json', Accept: 'text/event-stream' },
-    body: JSON.stringify({
-      message,
-      conversation_id: conversationId ?? null,
-      web_search: webSearch,
-      attachments: attachments.map((a) => ({
-        document_id: a.document_id,
-        filename: a.filename,
-        mime_type: a.mime_type,
-        url: a.url ?? null,
-        size_bytes: a.size_bytes,
-      })),
-    }),
-    signal,
+  const body = JSON.stringify({
+    message,
+    conversation_id: conversationId ?? null,
+    web_search: webSearch,
+    attachments: attachments.map((a) => ({
+      document_id: a.document_id,
+      filename: a.filename,
+      mime_type: a.mime_type,
+      url: a.url ?? null,
+      size_bytes: a.size_bytes,
+    })),
   })
+
+  const send = () =>
+    fetch(`${API_BASE}/chat`, {
+      method: 'POST',
+      headers: {
+        ...authHeaders(),
+        'Content-Type': 'application/json',
+        Accept: 'text/event-stream',
+      },
+      body,
+      signal,
+    })
+
+  let response = await send()
+
+  // A long-lived tab can outlive its access token; refresh once and retry
+  // before the stream even opens.
+  if (response.status === 401) {
+    await refreshAccessToken()
+    response = await send()
+  }
+
+  if (response.status === 429) {
+    handlers.onError?.(
+      (await response.json().catch(() => ({}))).detail ??
+        'Rate limit reached. Please wait before sending more messages.',
+    )
+    return
+  }
 
   if (!response.ok || !response.body) {
     let detail = `Request failed (${response.status})`

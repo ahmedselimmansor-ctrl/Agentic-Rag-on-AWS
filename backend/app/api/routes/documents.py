@@ -19,7 +19,7 @@ from fastapi import (
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
-from app.api.deps import CurrentUser, DbSession
+from app.api.deps import CurrentUser, DbSession, UploadUser
 from app.config import settings
 from app.db.models import Conversation, Document, DocumentStatus
 from app.schemas.chat import DocumentOut
@@ -35,7 +35,7 @@ IMAGE_PREFIX = "image/"
 @router.post("", response_model=DocumentOut, status_code=status.HTTP_202_ACCEPTED)
 async def upload_document(
     session: DbSession,
-    user: CurrentUser,
+    user: UploadUser,
     background: BackgroundTasks,
     file: UploadFile = File(...),
     conversation_id: uuid.UUID | None = Form(default=None),

@@ -11,6 +11,9 @@ interface SidebarProps {
   onSelect: (id: string) => void
   onDelete: (id: string) => void
   onRename: (id: string, title: string) => void
+  userEmail: string
+  userName: string | null
+  onSignOut: () => void
 }
 
 /** Groups threads the way people actually remember them: by recency band. */
@@ -47,6 +50,9 @@ export function Sidebar({
   onSelect,
   onDelete,
   onRename,
+  userEmail,
+  userName,
+  onSignOut,
 }: SidebarProps) {
   const [filter, setFilter] = useState('')
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -155,8 +161,15 @@ export function Sidebar({
         </nav>
 
         <footer className="sidebar-foot">
-          <span className="dot" aria-hidden />
-          <span>Agentic RAG</span>
+          <span className="avatar" aria-hidden>
+            {(userName || userEmail || '?').charAt(0).toUpperCase()}
+          </span>
+          <span className="sidebar-user" title={userEmail}>
+            {userName || userEmail}
+          </span>
+          <button className="sign-out" onClick={onSignOut}>
+            Sign out
+          </button>
         </footer>
       </aside>
     </>

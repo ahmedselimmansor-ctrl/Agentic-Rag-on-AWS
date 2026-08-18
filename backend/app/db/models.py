@@ -60,10 +60,36 @@ class User(Base, UUIDMixin, TimestampMixin):
 
     email: Mapped[str] = mapped_column(String(320), unique=True, nullable=False)
     display_name: Mapped[str | None] = mapped_column(String(200))
+    # Null for accounts provisioned by an external IdP or by header-auth dev mode.
+    password_hash: Mapped[str | None] = mapped_column(String(200))
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     settings_json: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
 
     conversations: Mapped[list[Conversation]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
+    )
+
+
+class RefreshToken(Base, UUIDMixin, TimestampMixin):
+    """One row per issued refresh token. Rotation replaces the row and links the
+    new one to the same `family_id`; replay of a revoked token revokes the family."""
+
+    __tablename__ = "refresh_tokens"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    # sha256 of the token; the plaintext is never stored.
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    family_id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    user_agent: Mapped[str | None] = mapped_column(String(400))
+
+    __table_args__ = (
+        Index("ix_refresh_tokens_user", "user_id", "revoked_at"),
+        Index("ix_refresh_tokens_family", "family_id"),
     )
 
 
@@ -124,6 +150,8 @@ class Message(Base, UUIDMixin, TimestampMixin):
     __table_args__ = (
         UniqueConstraint("conversation_id", "ordinal", name="uq_message_ordinal"),
         Index("ix_messages_conversation_ordinal", "conversation_id", "ordinal"),
+        # Backs the per-hour message quota.
+        Index("ix_messages_role_created", "role", "created_at"),
     )
 
 
@@ -159,6 +187,13 @@ class Document(Base, UUIDMixin, TimestampMixin):
     __table_args__ = (
         Index("ix_documents_user_conv", "user_id", "conversation_id"),
         UniqueConstraint("user_id", "sha256", name="uq_document_user_sha"),
+        # Substring/fuzzy filename lookup for the UI.
+        Index(
+            "ix_documents_filename_trgm",
+            "filename",
+            postgresql_using="gin",
+            postgresql_ops={"filename": "gin_trgm_ops"},
+        ),
     )
 
 
@@ -204,6 +239,16 @@ class Chunk(Base, UUIDMixin, TimestampMixin):
         UniqueConstraint("document_id", "ordinal", name="uq_chunk_ordinal"),
         Index("ix_chunks_user_conv", "user_id", "conversation_id"),
         CheckConstraint("modality in ('text','image')", name="ck_chunk_modality"),
+        # The two retrieval indexes are declared here, not only in the migration,
+        # so autogenerate compares against them instead of proposing to drop them.
+        Index(
+            "ix_chunks_embedding_hnsw",
+            "embedding",
+            postgresql_using="hnsw",
+            postgresql_with={"m": 16, "ef_construction": 64},
+            postgresql_ops={"embedding": "vector_cosine_ops"},
+        ),
+        Index("ix_chunks_tsv", "tsv", postgresql_using="gin"),
     )
 
 
@@ -234,6 +279,13 @@ class LongTermMemory(Base, UUIDMixin, TimestampMixin):
 
     __table_args__ = (
         Index("ix_ltm_user_active", "user_id", "superseded_by"),
+        Index(
+            "ix_ltm_embedding_hnsw",
+            "embedding",
+            postgresql_using="hnsw",
+            postgresql_with={"m": 16, "ef_construction": 64},
+            postgresql_ops={"embedding": "vector_cosine_ops"},
+        ),
     )
 
 

@@ -48,7 +48,8 @@ migrate: ## Apply migrations
 
 .PHONY: revision
 revision: ## Autogenerate a migration: make revision m="add x"
-	cd $(BACKEND) && alembic revision --autogenerate -m "$(m)"
+	@test -n "$(m)" || (echo 'Usage: make revision m="describe the change"' && exit 1)
+	cd $(BACKEND) && alembic revision --autogenerate -m "$(m)" && ruff format alembic/versions
 
 .PHONY: api
 api: ## Run the API on the host with reload

@@ -3,14 +3,9 @@ import type {
   ConversationDetail,
   DocumentRecord,
 } from '@/types'
+import { AuthRequiredError, authHeaders, refreshAccessToken } from './auth'
 
 const BASE = import.meta.env.VITE_API_BASE ?? '/api'
-
-/** Placeholder identity. Swap for a real bearer token behind Cognito/OIDC. */
-function identityHeaders(): Record<string, string> {
-  const email = localStorage.getItem('userEmail') ?? 'local@example.com'
-  return { 'X-User-Email': email }
-}
 
 class ApiError extends Error {
   constructor(
@@ -22,27 +17,37 @@ class ApiError extends Error {
   }
 }
 
-async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const response = await fetch(`${BASE}${path}`, {
-    ...init,
-    headers: {
-      ...identityHeaders(),
-      ...(init.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
-      ...init.headers,
-    },
-  })
+async function toError(response: Response): Promise<ApiError> {
+  let detail = response.statusText
+  try {
+    detail = (await response.json()).detail ?? detail
+  } catch {
+    /* non-JSON error body */
+  }
+  return new ApiError(detail, response.status)
+}
 
-  if (!response.ok) {
-    let detail = response.statusText
-    try {
-      const body = await response.json()
-      detail = body.detail ?? detail
-    } catch {
-      /* non-JSON error body */
-    }
-    throw new ApiError(detail, response.status)
+/** Issues the request, refreshing the access token once on a 401. */
+async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const send = () =>
+    fetch(`${BASE}${path}`, {
+      ...init,
+      headers: {
+        ...authHeaders(),
+        // FormData must set its own multipart boundary.
+        ...(init.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
+        ...init.headers,
+      },
+    })
+
+  let response = await send()
+
+  if (response.status === 401) {
+    await refreshAccessToken() // throws AuthRequiredError when the session is over
+    response = await send()
   }
 
+  if (!response.ok) throw await toError(response)
   if (response.status === 204) return undefined as T
   return response.json() as Promise<T>
 }
@@ -86,6 +91,22 @@ export const api = {
     request<{ url: string; mime_type: string }>(`/documents/${id}/url`),
 
   deleteDocument: (id: string) => request<void>(`/documents/${id}`, { method: 'DELETE' }),
+
+  listMemories: () =>
+    request<
+      Array<{
+        id: string
+        kind: string
+        content: string
+        salience: number
+        use_count: number
+        created_at: string
+      }>
+    >('/memories'),
+
+  deleteMemory: (id: string) => request<void>(`/memories/${id}`, { method: 'DELETE' }),
+
+  clearMemories: () => request<void>('/memories', { method: 'DELETE' }),
 }
 
-export { ApiError, BASE as API_BASE, identityHeaders }
+export { ApiError, AuthRequiredError, BASE as API_BASE }

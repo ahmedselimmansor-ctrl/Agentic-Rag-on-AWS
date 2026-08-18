@@ -211,14 +211,59 @@ frontend/
 infra/terraform/  VPC, RDS, ECS, ALB, CloudFront, S3, Secrets
 ```
 
+## Authentication
+
+Email + password, with short-lived JWT access tokens and long-lived rotating
+refresh tokens.
+
+- **Rotation with replay detection.** Every refresh issues a new token and
+  revokes the old one. If a revoked token is presented again, the whole token
+  *family* is revoked — a stolen token turns into a forced re-login rather than
+  silent persistent access.
+- **Only hashes are stored.** Passwords use bcrypt (cost 12); refresh tokens are
+  stored as SHA-256. A database leak yields no working credentials.
+- **No account enumeration.** Wrong password and unknown account return the
+  identical error, and the unknown-account path burns equivalent CPU so response
+  timing does not distinguish them either.
+- **Length over composition.** Minimum 10 characters, no symbol-class rules —
+  complexity requirements push people toward reused passwords.
+
+Endpoints: `POST /api/auth/{register,login,refresh,logout,logout-all}`,
+`GET /api/auth/me`.
+
+`AUTH_MODE=header` restores the old header-trusting behaviour for local
+development only; `Settings` refuses it when `ENVIRONMENT` is staging or prod.
+To use Cognito or another OIDC provider instead, replace `resolve_user` in
+[deps.py](backend/app/api/deps.py) — it is the only place identity is read.
+
+### Rate limits
+
+Per user, counted from rows that already exist, so there is no extra write path
+and the limit holds across every ECS task rather than per-process:
+`MAX_MESSAGES_PER_HOUR` (120) and `MAX_UPLOADS_PER_HOUR` (60).
+
+## CI
+
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every push and PR:
+
+| Job | Checks |
+|---|---|
+| backend | ruff, pytest, migrations apply against real pgvector, **migration-drift check**, downgrade to base |
+| frontend | tsc, vitest, production build |
+| docker | both images build with layer caching |
+| terraform | `fmt -check`, `validate` |
+
+The drift check runs `alembic revision --autogenerate` and fails if it produces
+any operations — that is how a model change with no migration gets caught before
+it reaches a deploy rather than after.
+
 ## Known gaps
 
-- **Auth is a placeholder.** `X-User-Email` is trusted as-is. Put Cognito or any
-  OIDC provider in front and replace `resolve_user` in
-  [deps.py](backend/app/api/deps.py) — nothing else reads identity.
-- **Scanned PDFs need OCR.** `pypdf` extracts embedded text only; a scanned
-  document ingests as an explicit failure rather than an empty index. Add
-  Textract in the ingestion pipeline if you need it.
 - **Ingestion runs in-process** via FastAPI background tasks. Fine to a few
   hundred documents; past that, move it to SQS + a worker service so a large
   upload cannot compete with request latency.
+- **OCR needs S3.** Textract reads from a bucket, so scanned PDFs cannot be
+  OCR'd with `UPLOAD_BACKEND=local`. Ingestion says so explicitly rather than
+  failing opaquely.
+- **No email verification or password reset.** Registration trusts the address
+  as given. Wire in SES before treating an account as a real identity.

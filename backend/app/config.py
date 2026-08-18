@@ -8,6 +8,10 @@ from typing import Annotated, Literal
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
+# Ephemeral signing key for local dev when JWT_SECRET is unset; see
+# Settings.effective_jwt_secret.
+_DEV_SECRET: str | None = None
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -28,6 +32,22 @@ class Settings(BaseSettings):
         "http://localhost:5173",
         "http://localhost:3000",
     ]
+
+    # --------------------------------------------------------------- auth ---
+    # "jwt"    — email/password with signed access + rotating refresh tokens
+    # "header" — trust X-User-Email. LOCAL DEVELOPMENT ONLY; refused in prod.
+    auth_mode: Literal["jwt", "header"] = "jwt"
+    jwt_secret: str = ""
+    jwt_algorithm: str = "HS256"
+    access_token_ttl_minutes: int = 30
+    refresh_token_ttl_days: int = 30
+    allow_registration: bool = True
+    password_min_length: int = 10
+
+    # --------------------------------------------------------- rate limits --
+    # Counted from existing rows, so no extra write path and accurate across tasks.
+    max_messages_per_hour: int = 120
+    max_uploads_per_hour: int = 60
 
     # ----------------------------------------------------------- database ---
     # asyncpg DSN, e.g. postgresql+asyncpg://user:pass@host:5432/agentic_rag
@@ -113,6 +133,40 @@ class Settings(BaseSettings):
                 return json.loads(raw)
             return [o.strip() for o in raw.split(",") if o.strip()]
         return v
+
+    @field_validator("jwt_secret")
+    @classmethod
+    def _require_strong_secret(cls, v: str, info) -> str:  # noqa: ANN001
+        """A signing key short enough to brute-force is worse than no auth at
+        all, because it looks secure. Enforced only outside local dev."""
+        environment = info.data.get("environment", "local")
+        auth_mode = info.data.get("auth_mode", "jwt")
+        if environment != "local" and auth_mode == "jwt" and len(v) < 32:
+            raise ValueError(
+                "JWT_SECRET must be at least 32 characters outside local dev. "
+                "Generate one with: openssl rand -hex 32"
+            )
+        return v
+
+    @field_validator("auth_mode")
+    @classmethod
+    def _refuse_header_auth_in_prod(cls, v: str, info) -> str:  # noqa: ANN001
+        if v == "header" and info.data.get("environment") in {"staging", "prod"}:
+            raise ValueError("AUTH_MODE=header trusts a client header; never use it in staging/prod")
+        return v
+
+    @property
+    def effective_jwt_secret(self) -> str:
+        """Local dev gets an ephemeral key so the app runs with no setup —
+        tokens simply do not survive a restart."""
+        if self.jwt_secret:
+            return self.jwt_secret
+        import secrets
+
+        global _DEV_SECRET
+        if _DEV_SECRET is None:
+            _DEV_SECRET = secrets.token_hex(32)
+        return _DEV_SECRET
 
     @property
     def sync_database_url(self) -> str:

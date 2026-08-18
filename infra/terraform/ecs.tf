@@ -135,6 +135,10 @@ locals {
     { name = "RERANK_MODEL", value = var.rerank_model },
     { name = "DASHSCOPE_BASE_URL", value = var.dashscope_base_url },
     { name = "WEB_SEARCH_PROVIDER", value = var.tavily_api_key != "" ? "tavily" : "none" },
+    { name = "AUTH_MODE", value = "jwt" },
+    { name = "ALLOW_REGISTRATION", value = tostring(var.allow_registration) },
+    { name = "MAX_MESSAGES_PER_HOUR", value = tostring(var.max_messages_per_hour) },
+    { name = "MAX_UPLOADS_PER_HOUR", value = tostring(var.max_uploads_per_hour) },
     {
       name  = "CORS_ORIGINS"
       value = var.domain_name != "" ? "https://${var.domain_name}" : "https://${aws_cloudfront_distribution.main.domain_name}"
@@ -146,6 +150,7 @@ locals {
     { name = "OPENAI_API_KEY", valueFrom = "${aws_secretsmanager_secret.app.arn}:OPENAI_API_KEY::" },
     { name = "DASHSCOPE_API_KEY", valueFrom = "${aws_secretsmanager_secret.app.arn}:DASHSCOPE_API_KEY::" },
     { name = "TAVILY_API_KEY", valueFrom = "${aws_secretsmanager_secret.app.arn}:TAVILY_API_KEY::" },
+    { name = "JWT_SECRET", valueFrom = "${aws_secretsmanager_secret.app.arn}:JWT_SECRET::" },
   ]
 }
 

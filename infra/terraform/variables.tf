@@ -170,3 +170,20 @@ variable "log_retention_days" {
   type    = number
   default = 30
 }
+
+# ---------------------------------------------------------------- auth -----
+variable "allow_registration" {
+  description = "Set false to freeze sign-ups once your users have accounts."
+  type        = bool
+  default     = true
+}
+
+variable "max_messages_per_hour" {
+  type    = number
+  default = 120
+}
+
+variable "max_uploads_per_hour" {
+  type    = number
+  default = 60
+}

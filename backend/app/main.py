@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 
-from app.api.routes import chat, conversations, documents, health, memories
+from app.api.routes import auth, chat, conversations, documents, health, memories
 from app.config import settings
 from app.core.logging import configure_logging, log_extra, new_request_id, request_id_ctx
 from app.db.session import dispose_engine
@@ -102,6 +102,7 @@ async def unhandled_exception(request: Request, exc: Exception) -> JSONResponse:
 
 
 app.include_router(health.router, prefix=settings.api_prefix)
+app.include_router(auth.router, prefix=settings.api_prefix)
 app.include_router(chat.router, prefix=settings.api_prefix)
 app.include_router(conversations.router, prefix=settings.api_prefix)
 app.include_router(documents.router, prefix=settings.api_prefix)

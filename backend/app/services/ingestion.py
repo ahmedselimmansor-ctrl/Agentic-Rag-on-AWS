@@ -16,10 +16,10 @@ from sqlalchemy import select, update
 from app.config import settings
 from app.db.models import Chunk, Document, DocumentStatus
 from app.db.session import session_scope
-from app.services import storage
+from app.services import ocr, storage
 from app.services.chunking import ChunkDraft, chunk_document
 from app.services.embeddings import EmbedInput, embed
-from app.services.parsing import UnsupportedFileType, parse
+from app.services.parsing import ParsedBlock, UnsupportedFileType, parse
 
 logger = logging.getLogger(__name__)
 
@@ -52,10 +52,8 @@ async def ingest_document(document_id: uuid.UUID) -> IngestResult:
         parsed = parse(local_path, mime_type, storage_uri=storage_uri)
 
         if not parsed.blocks:
-            raise UnsupportedFileType(
-                f"No extractable content in {filename}. "
-                "Scanned PDFs need an OCR pass before ingestion."
-            )
+            # No text layer — most likely a scan. Try OCR before giving up.
+            parsed = _ocr_fallback(parsed, storage_uri, mime_type, filename)
 
         await _set_status(document_id, DocumentStatus.chunking)
         drafts = chunk_document(parsed)
@@ -110,6 +108,38 @@ async def ingest_document(document_id: uuid.UUID) -> IngestResult:
     finally:
         if local_path:
             storage.cleanup_temp(local_path, storage_uri)
+
+
+def _ocr_fallback(parsed, storage_uri: str, mime_type: str, filename: str):  # noqa: ANN001, ANN202
+    """Run OCR on a PDF that yielded no text. Raises with an actionable message
+    when OCR is unavailable, so the UI can explain what to do."""
+    is_pdf = "pdf" in (mime_type or "").lower() or filename.lower().endswith(".pdf")
+
+    if not is_pdf:
+        raise UnsupportedFileType(f"No extractable content in {filename}.")
+
+    if not ocr.is_available():
+        raise UnsupportedFileType(
+            f"{filename} has no text layer (it is most likely a scan). "
+            "OCR requires S3 storage; set UPLOAD_BACKEND=s3 to enable it."
+        )
+
+    logger.info("no text layer in %s, falling back to OCR", filename)
+    try:
+        pages = ocr.extract_pdf(storage_uri)
+    except ocr.OCRUnavailable as exc:
+        raise UnsupportedFileType(f"{filename} needs OCR, which failed: {exc}") from exc
+
+    if not pages:
+        raise UnsupportedFileType(f"OCR found no text in {filename}.")
+
+    parsed.blocks = [
+        ParsedBlock(text=page.text, page=page.page) for page in pages if page.text.strip()
+    ]
+    parsed.page_count = len(pages)
+    parsed.metadata = {**(parsed.metadata or {}), "ocr": True}
+    logger.info("OCR recovered %d pages from %s", len(pages), filename)
+    return parsed
 
 
 async def _embed_drafts(drafts: list[ChunkDraft]) -> list[list[float]]:

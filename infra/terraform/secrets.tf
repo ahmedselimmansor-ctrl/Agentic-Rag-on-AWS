@@ -9,6 +9,13 @@ locals {
   )
 }
 
+# Generated rather than supplied: one less secret for a human to mishandle,
+# and rotating it is a `terraform taint` away.
+resource "random_password" "jwt_secret" {
+  length  = 64
+  special = false
+}
+
 resource "aws_secretsmanager_secret" "app" {
   name                    = "${local.name}/app"
   description             = "Model provider keys and the database DSN"
@@ -23,5 +30,6 @@ resource "aws_secretsmanager_secret_version" "app" {
     OPENAI_API_KEY    = var.openai_api_key
     DASHSCOPE_API_KEY = var.dashscope_api_key
     TAVILY_API_KEY    = var.tavily_api_key
+    JWT_SECRET        = random_password.jwt_secret.result
   })
 }

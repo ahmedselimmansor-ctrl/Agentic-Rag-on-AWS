@@ -9,7 +9,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select
 
 from app.agent.runner import run_turn
-from app.api.deps import CurrentUser, DbSession
+from app.api.deps import CurrentUser, DbSession, RateLimitedUser
 from app.db.models import Conversation
 from app.schemas.chat import ChatRequest, SearchHit, SearchRequest
 from app.services.retrieval import retrieve
@@ -26,7 +26,7 @@ SSE_HEADERS = {
 
 
 @router.post("/chat")
-async def chat(payload: ChatRequest, session: DbSession, user: CurrentUser) -> StreamingResponse:
+async def chat(payload: ChatRequest, session: DbSession, user: RateLimitedUser) -> StreamingResponse:
     """Stream one assistant turn. Frames: start, status, tool_call, tool_result,
     sources, token, usage, done | error."""
     conversation_id = payload.conversation_id
