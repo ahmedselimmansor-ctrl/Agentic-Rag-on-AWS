@@ -7,7 +7,12 @@ aws_region  = "us-east-1"
 # ---- secrets -----------------------------------------------------------
 openai_api_key    = "sk-..."
 dashscope_api_key = "sk-..."
-tavily_api_key    = ""    # leave empty to ship with web search disabled
+tavily_api_key    = ""    # only needed when web_search_provider = "tavily"
+
+# ---- web search --------------------------------------------------------
+# "openai" uses the generation model's own built-in search — no extra key.
+web_search_provider    = "openai"
+openai_web_search_tool = "web_search"
 
 # ---- models ------------------------------------------------------------
 generation_model   = "gpt-5.6-luna"

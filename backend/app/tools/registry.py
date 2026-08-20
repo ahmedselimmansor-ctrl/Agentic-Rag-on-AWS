@@ -99,11 +99,20 @@ FETCH_PAGE_SCHEMA = {
 }
 
 
+def uses_native_web_search() -> bool:
+    """True when the generation model does its own searching server-side."""
+    return settings.web_search_provider == "openai"
+
+
 def available_tools(*, web_enabled: bool, has_documents: bool) -> list[dict[str, Any]]:
+    """Function tools *we* execute. Native web search is not among them: the
+    model runs it itself and never hands the call back to us, so registering a
+    duplicate `web_search` function would only give it two ways to do one thing.
+    """
     tools: list[dict[str, Any]] = []
     if has_documents:
         tools.append(SEARCH_DOCUMENTS_SCHEMA)
-    if web_enabled and settings.web_search_provider != "none":
+    if web_enabled and settings.web_search_provider in {"tavily", "serper"}:
         tools.append(WEB_SEARCH_SCHEMA)
         tools.append(FETCH_PAGE_SCHEMA)
     return tools

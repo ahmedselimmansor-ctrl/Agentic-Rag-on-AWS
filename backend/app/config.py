@@ -123,7 +123,17 @@ class Settings(BaseSettings):
     agent_recursion_limit: int = 25
 
     # -------------------------------------------------------- web search ---
-    web_search_provider: Literal["tavily", "serper", "none"] = "tavily"
+    # "openai"  — the generation model's own built-in web search. Runs
+    #             server-side via the Responses API; no third-party key needed.
+    # "tavily"/"serper" — an external API called as one of our own tools.
+    web_search_provider: Literal["openai", "tavily", "serper", "none"] = "openai"
+    # Providers have renamed this tool over time ("web_search",
+    # "web_search_preview", …). A wrong name is a 400, not a silent no-op, so it
+    # is configurable rather than hard-coded.
+    openai_web_search_tool: str = "web_search"
+    # "low" | "medium" | "high" — how much retrieved page content the model
+    # pulls into context. Empty leaves the provider default.
+    openai_web_search_context_size: str = ""
     tavily_api_key: str = ""
     serper_api_key: str = ""
     web_search_max_results: int = 6

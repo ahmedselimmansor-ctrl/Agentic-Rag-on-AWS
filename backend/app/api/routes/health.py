@@ -53,7 +53,13 @@ async def ready(session: DbSession) -> HealthOut:
 
     checks["openai_key"] = "set" if settings.openai_api_key else "MISSING"
     checks["dashscope_key"] = "set" if settings.dashscope_api_key else "MISSING"
-    checks["web_search"] = settings.web_search_provider
+    if settings.web_search_provider == "openai":
+        checks["web_search"] = f"native ({settings.openai_web_search_tool}, Responses API)"
+    elif settings.web_search_provider == "none":
+        checks["web_search"] = "disabled"
+    else:
+        key = settings.tavily_api_key if settings.web_search_provider == "tavily" else settings.serper_api_key
+        checks["web_search"] = f"{settings.web_search_provider} ({'key set' if key else 'KEY MISSING'})"
     checks["generation_model"] = settings.generation_model
     checks["embedding_model"] = f"{settings.embedding_model} (dim={settings.embedding_dim})"
     checks["rerank_model"] = settings.rerank_model

@@ -10,6 +10,7 @@ SQLAlchemy + Alembic · ECS Fargate · Terraform
 | | |
 |---|---|
 | Generation | OpenAI (streaming, tool calling) |
+| Web search | The generation model's own built-in search — no third-party key |
 | Embeddings | `tongyi-embedding-vision-flash` — multimodal, Alibaba Model Studio |
 | Reranking | `qwen3-rerank` — cross-encoder, Alibaba Model Studio |
 | Vector store | pgvector HNSW, cosine |
@@ -66,9 +67,9 @@ flowchart TB
     textract["Textract<br/>OCR fallback"]
     cw["CloudWatch<br/>logs · alarms · dashboard"]
 
-    openai["OpenAI<br/>generation"]
+    openai["OpenAI<br/>generation + built-in web search"]
     dashscope["Alibaba Model Studio<br/>embeddings + rerank"]
-    tavily["Tavily<br/>web search"]
+    tavily["Tavily / Serper<br/>optional external search"]
 
     browser --> cf
     cf --> s3web
@@ -88,7 +89,7 @@ flowchart TB
     worker --> nat
     nat --> openai
     nat --> dashscope
-    nat --> tavily
+    nat -.-> tavily
 
     secrets -.-> api
     secrets -.-> worker
@@ -255,6 +256,59 @@ an infinite deliberation.
 > the run config rather than LangGraph's custom-stream writer. That gives true
 > token-level delivery with backpressure and keeps the SSE contract independent
 > of the LangGraph version in use.
+
+### Web search: native or external
+
+By default the **generation model does its own searching**. No third-party
+account, no separate key, and the model reads full pages rather than the snippet
+an external API chose to return.
+
+```mermaid
+flowchart TB
+    subgraph native["WEB_SEARCH_PROVIDER=openai — default"]
+        direction LR
+        n1["API"] -- "Responses API<br/>tools: [web_search, search_documents]" --> n2["Model"]
+        n2 -. "searches, reads,<br/>keeps generating —<br/>all server-side" .-> n2
+        n2 -- "tokens + url_citation<br/>annotations" --> n1
+    end
+
+    subgraph external["WEB_SEARCH_PROVIDER=tavily | serper"]
+        direction LR
+        e1["API"] -- "Chat Completions<br/>tools: [web_search, search_documents]" --> e2["Model"]
+        e2 -- "tool_call" --> e1
+        e1 -- "HTTP" --> e3["Tavily / Serper"]
+        e3 -- "results" --> e1
+        e1 -- "tool result,<br/>second round-trip" --> e2
+    end
+
+    classDef emph fill:#eefaf1,stroke:#5bb37c,color:#1c3325
+    class native emph
+```
+
+The difference is where the loop closes. Native search never hands the call back
+to us — the model searches, reads, and continues generating inside one turn, so
+there is no second round-trip and no extra latency. External search costs a full
+extra request cycle per search.
+
+Both modes converge on the same UI: hosted searches surface as `tool_call`
+events, and `url_citation` annotations are folded into the same numbered
+`sources` list document passages use, so citation chips render identically.
+
+| | Native (`openai`) | External (`tavily`/`serper`) |
+|---|---|---|
+| API surface | Responses | Chat Completions |
+| Extra key | none | required |
+| Round-trips per search | 0 | 1 |
+| Page content | model reads the page | provider's snippet |
+| Runs when | `web_search: true` on the request | same |
+
+`OPENAI_WEB_SEARCH_TOOL` sets the hosted tool type (default `web_search`).
+Providers have renamed this between releases, so it is configurable — and a
+wrong name returns a 400 that the API translates into an actionable message
+naming both the setting and the fallback.
+
+The `search_documents` function tool is registered on **both** paths, so the
+model can search your documents and the web in the same turn.
 
 ---
 
@@ -620,7 +674,8 @@ Every knob is an environment variable; see [.env.example](.env.example).
 | `EMBEDDING_DIM` | `1024` | Must match the model's output — see below. |
 | `RERANK_MODEL` | `qwen3-rerank` | |
 | `DASHSCOPE_BASE_URL` | `https://dashscope-intl.aliyuncs.com` | Use `dashscope.aliyuncs.com` inside mainland China. |
-| `WEB_SEARCH_PROVIDER` | `tavily` | `tavily`, `serper`, or `none`. |
+| `WEB_SEARCH_PROVIDER` | `openai` | `openai` (model's built-in), `tavily`, `serper`, `none`. |
+| `OPENAI_WEB_SEARCH_TOOL` | `web_search` | Hosted tool type — providers rename this between releases. |
 | `MODEL_CONTEXT_WINDOW` | `200000` | Drives the whole context budget. |
 | `AGENT_MAX_STEPS` | `6` | Tool rounds before a final answer is forced. |
 | `AUTH_MODE` | `jwt` | `header` is local-dev only and refused in prod. |

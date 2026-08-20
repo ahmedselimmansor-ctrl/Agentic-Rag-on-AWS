@@ -34,7 +34,7 @@ from app.agent.state import AgentState
 from app.config import settings
 from app.services import memory as memory_service
 from app.services.context import build_messages
-from app.services.llm import ToolCall, complete, stream_chat
+from app.services.llm import Citation, ToolCall, complete, stream_chat, stream_responses
 from app.services.retrieval import retrieve as retrieve_chunks
 from app.tools import registry
 
@@ -175,12 +175,22 @@ async def generate(state: AgentState, config: RunnableConfig) -> dict:
     if state.get("step", 0) >= settings.agent_max_steps:
         tools = []
 
+    # Native search runs inside the model's own turn, so it must be requested on
+    # this call rather than executed by us between calls.
+    native_search = registry.uses_native_web_search() and bool(state.get("web_enabled"))
+
     answer_parts: list[str] = []
     tool_calls: list[ToolCall] = []
     usage: dict[str, int] = {}
+    citations: list[Citation] = []
+
+    if native_search:
+        stream = stream_responses(messages, tools=tools or None, web_search=True)
+    else:
+        stream = stream_chat(messages, tools=tools or None)
 
     try:
-        async for event in stream_chat(messages, tools=tools or None):
+        async for event in stream:
             if event.type == "token":
                 answer_parts.append(event.text)
                 await emitter.emit("token", text=event.text)
@@ -188,6 +198,12 @@ async def generate(state: AgentState, config: RunnableConfig) -> dict:
                 tool_calls = event.tool_calls
             elif event.type == "usage":
                 usage = event.usage
+            elif event.type == "hosted_tool":
+                # The model searched server-side; surface it in the same trace
+                # the UI already renders for tools we run ourselves.
+                await emitter.emit("tool_call", name=event.tool_name, arguments={})
+            elif event.type == "citations":
+                citations = event.citations
     except RuntimeError as exc:
         # Recorded in state, not emitted: the runner owns the single terminal
         # `error` frame so the client never sees the failure twice.
@@ -196,15 +212,54 @@ async def generate(state: AgentState, config: RunnableConfig) -> dict:
 
     answer = "".join(answer_parts)
 
+    trace: list[dict] = []
+    if citations:
+        sources = _append_citations(sources, citations)
+        await emitter.emit("sources", sources=sources)
+        trace.append(
+            {
+                "tool": "web_search",
+                "arguments": {"native": True},
+                "ok": True,
+                "result_count": len(citations),
+            }
+        )
+
     return {
         "llm_messages": messages,
         "answer": (state.get("answer") or "") + answer if tool_calls else answer or state.get("answer", ""),
         "sources": sources,
         "pending_tool_calls": tool_calls,
+        "tool_trace": trace,
         "prompt_tokens": usage.get("prompt_tokens", state.get("prompt_tokens", 0)),
         "completion_tokens": state.get("completion_tokens", 0) + usage.get("completion_tokens", 0),
         "step": 1,
     }
+
+
+def _append_citations(sources: list[dict], citations: list[Citation]) -> list[dict]:
+    """Fold hosted-search citations into the same numbered source list the
+    document passages use, so the UI renders both identically."""
+    merged = list(sources)
+    seen = {s.get("url") for s in merged if s.get("url")}
+    next_index = max((s.get("index", 0) for s in merged), default=0) + 1
+
+    for citation in citations:
+        if citation.url in seen:
+            continue
+        seen.add(citation.url)
+        merged.append(
+            {
+                "index": next_index,
+                "label": citation.title or citation.url,
+                "url": citation.url,
+                "snippet": citation.snippet[:400],
+                "kind": "web",
+            }
+        )
+        next_index += 1
+
+    return merged
 
 
 # ================================================================== tools ===

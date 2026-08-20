@@ -121,9 +121,27 @@ variable "dashscope_api_key" {
 }
 
 variable "tavily_api_key" {
-  type      = string
-  sensitive = true
-  default   = ""
+  description = "Only needed when web_search_provider is tavily."
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "web_search_provider" {
+  description = "openai (model's built-in search) | tavily | serper | none."
+  type        = string
+  default     = "openai"
+
+  validation {
+    condition     = contains(["openai", "tavily", "serper", "none"], var.web_search_provider)
+    error_message = "web_search_provider must be openai, tavily, serper, or none."
+  }
+}
+
+variable "openai_web_search_tool" {
+  description = "Hosted tool type. Providers rename this between releases."
+  type        = string
+  default     = "web_search"
 }
 
 # -------------------------------------------------------------- models -----
