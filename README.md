@@ -4,15 +4,15 @@ Retrieval-augmented chat with a bounded agent loop: hybrid retrieval over your
 own documents, cross-encoder reranking, web search as a tool, two-tier memory,
 and token-by-token streaming to a React frontend.
 
-**Stack** — React 18 · FastAPI · LangGraph · PostgreSQL 16 + pgvector ·
+**Stack**: React 18 · FastAPI · LangGraph · PostgreSQL 16 + pgvector ·
 SQLAlchemy + Alembic · ECS Fargate · Terraform
 
 | | |
 |---|---|
 | Generation | OpenAI (streaming, tool calling) |
-| Web search | The generation model's own built-in search — no third-party key |
-| Embeddings | `tongyi-embedding-vision-flash` — multimodal, Alibaba Model Studio |
-| Reranking | `qwen3-rerank` — cross-encoder, Alibaba Model Studio |
+| Web search | The generation model's own built-in search, no third-party key |
+| Embeddings | `tongyi-embedding-vision-flash` (multimodal, Alibaba Model Studio) |
+| Reranking | `qwen3-rerank` (cross-encoder, Alibaba Model Studio) |
 | Vector store | pgvector HNSW, cosine |
 | Keyword store | Postgres `tsvector` + GIN |
 
@@ -47,15 +47,15 @@ flowchart TB
         cf["<b>CloudFront</b><br/>static assets cached<br/>/api/* pass-through, compression OFF"]
     end
 
-    subgraph vpc["VPC — 2 Availability Zones"]
+    subgraph vpc["VPC across 2 Availability Zones"]
         subgraph pub["Public subnets"]
             alb["<b>Application Load Balancer</b><br/>600s idle timeout<br/>rejects requests without X-Origin-Verify"]
             nat["NAT Gateway"]
         end
 
         subgraph priv["Private subnets"]
-            api["<b>ECS Fargate — API</b><br/>FastAPI + LangGraph<br/>autoscale 2–10"]
-            worker["<b>ECS Fargate — Worker</b><br/>ingestion pipeline<br/>autoscale on queue depth"]
+            api["<b>ECS Fargate: API</b><br/>FastAPI + LangGraph<br/>autoscale 2–10"]
+            worker["<b>ECS Fargate: Worker</b><br/>ingestion pipeline<br/>autoscale on queue depth"]
             db[("<b>RDS PostgreSQL 16</b><br/>pgvector · encrypted · Multi-AZ optional")]
         end
     end
@@ -122,7 +122,7 @@ flowchart TB
 
 ```mermaid
 flowchart LR
-    subgraph ingest["INGESTION — asynchronous"]
+    subgraph ingest["INGESTION (asynchronous)"]
         direction TB
         up["Upload<br/>PDF · DOCX · MD · HTML · CSV · image"]
         parse["<b>Parse</b><br/>structured blocks with<br/>heading trail + page number"]
@@ -133,7 +133,7 @@ flowchart LR
         store[("chunks<br/>embedding + tsv")]
     end
 
-    subgraph query["QUERY — synchronous"]
+    subgraph query["QUERY (synchronous)"]
         direction TB
         q["User question"]
         rewrite["<b>Rewrite</b><br/>resolve pronouns against history"]
@@ -182,7 +182,7 @@ flowchart LR
 
 ### Why hybrid, then rerank
 
-Dense search finds paraphrases but misses rare literals — part numbers, error
+Dense search finds paraphrases but misses rare literals: part numbers, error
 codes, surnames. Sparse search nails those literals but misses synonyms. RRF
 merges the two ranked lists **without needing their scores to share a scale**,
 then the cross-encoder does a precision pass over the fused candidates by
@@ -205,7 +205,7 @@ contains the word, purely through its heading.
 ### Context budget
 
 Spent in priority order, because when the window is tight the things that must
-survive are the system prompt and the actual question — not the tenth passage.
+survive are the system prompt and the actual question, not the tenth passage.
 
 ```mermaid
 flowchart LR
@@ -264,10 +264,10 @@ an external API chose to return.
 
 ```mermaid
 flowchart TB
-    subgraph native["WEB_SEARCH_PROVIDER=openai — default"]
+    subgraph native["WEB_SEARCH_PROVIDER=openai (default)"]
         direction LR
         n1["API"] -- "Responses API<br/>tools: [web_search, search_documents]" --> n2["Model"]
-        n2 -. "searches, reads,<br/>keeps generating —<br/>all server-side" .-> n2
+        n2 -. "searches, reads,<br/>keeps generating,<br/>all server-side" .-> n2
         n2 -- "tokens + url_citation<br/>annotations" --> n1
     end
 
@@ -285,7 +285,7 @@ flowchart TB
 ```
 
 The difference is where the loop closes. Native search never hands the call back
-to us — the model searches, reads, and continues generating inside one turn, so
+to us: the model searches, reads, and continues generating inside one turn, so
 there is no second round-trip and no extra latency. External search costs a full
 extra request cycle per search.
 
@@ -302,7 +302,7 @@ events, and `url_citation` annotations are folded into the same numbered
 | Runs when | `web_search: true` on the request | same |
 
 `OPENAI_WEB_SEARCH_TOOL` sets the hosted tool type (default `web_search`).
-Providers have renamed this between releases, so it is configurable — and a
+Providers have renamed this between releases, so it is configurable, and a
 wrong name returns a 400 that the API translates into an actionable message
 naming both the setting and the fallback.
 
@@ -357,7 +357,7 @@ sequenceDiagram
     A->>P: persist assistant message + citations
     A-->>U: event: done
 
-    Note over A,P: after the stream closes —<br/>summarise older turns,<br/>extract long-term memories
+    Note over A,P: after the stream closes:<br/>summarise older turns,<br/>extract long-term memories
 ```
 
 Post-turn work (summarisation, memory extraction) happens **after** the response
@@ -376,7 +376,7 @@ every 15s as heartbeats, so no proxy reaps an idle connection mid-answer.
 | `tool_call` / `tool_result` | agent trace |
 | `token` | one generation delta |
 | `usage` | token counts, latency, step count |
-| `done` \| `error` | terminal — exactly one per turn |
+| `done` \| `error` | terminal, exactly one per turn |
 
 ---
 
@@ -447,7 +447,7 @@ erDiagram
         varchar_200 mime_type
         bigint size_bytes
         text storage_uri "s3:// or file://"
-        varchar_64 sha256 "unique per user — dedupes re-uploads"
+        varchar_64 sha256 "unique per user, dedupes re-uploads"
         enum status "pending|parsing|chunking|embedding|ready|failed"
         text error
         integer page_count
@@ -479,7 +479,7 @@ erDiagram
         enum kind "fact|preference|entity"
         text content
         vector_1024 embedding "HNSW cosine"
-        float salience "0..1 — biases recall"
+        float salience "0..1, biases recall"
         uuid source_conversation_id FK
         timestamptz last_used_at
         integer use_count
@@ -489,7 +489,7 @@ erDiagram
     refresh_tokens {
         uuid id PK
         uuid user_id FK
-        varchar_64 token_hash UK "sha256 — plaintext never stored"
+        varchar_64 token_hash UK "sha256, plaintext never stored"
         uuid family_id "rotation lineage"
         timestamptz expires_at
         timestamptz revoked_at
@@ -553,7 +553,7 @@ the hot path; joining to `documents` for every candidate would add work to the
 one query that must stay fast.
 
 **`messages.ordinal` is monotonic per conversation** with a unique constraint. It
-drives the verbatim history window and the summarisation cutoff — wall-clock
+drives the verbatim history window and the summarisation cutoff. Wall-clock
 timestamps would be ambiguous under concurrent writes.
 
 **`documents.sha256` is unique per user.** Re-uploading identical bytes reuses the
@@ -575,7 +575,7 @@ silent token theft into a forced re-login.
 | `0003` | Email verification, password reset tokens |
 
 All three are reversible and verified up → down → up against real Postgres in
-CI. `EMBEDDING_DIM` is read by the model, the migration, and the index — change
+CI. `EMBEDDING_DIM` is read by the model, the migration, and the index. Change
 it and you need a new migration plus a full re-embed.
 
 ---
@@ -605,27 +605,27 @@ sequenceDiagram
     C->>A: POST /auth/refresh (token R1)
     A->>D: R1 already revoked → revoke ALL of family F
     A->>D: COMMIT before raising
-    A-->>C: 401 — session revoked
+    A-->>C: 401, session revoked
 ```
 
 - **Access tokens are stateless and short-lived; refresh tokens are stateful and
   long-lived.** Revocation therefore takes effect within one access-token
   lifetime rather than never.
-- **Only hashes are stored** — bcrypt cost 12 for passwords, SHA-256 for refresh
+- **Only hashes are stored**: bcrypt cost 12 for passwords, SHA-256 for refresh
   and one-time tokens.
 - **No account enumeration.** Wrong password and unknown account return the same
   error, and the unknown-account path burns equivalent CPU so response timing
   does not distinguish them either. `forgot-password` answers identically for
   known, unknown, and malformed addresses.
-- **Length over composition.** Minimum 10 characters, no symbol-class rules —
-  complexity requirements push people toward reused passwords.
+- **Length over composition.** Minimum 10 characters, no symbol-class rules.
+  Complexity requirements push people toward reused passwords.
 - A successful password reset revokes **every** refresh token, because a reset is
   the remedy for a compromised account.
 
 `AUTH_MODE=header` restores a header-trusting shortcut for local development;
 `Settings` refuses it when `ENVIRONMENT` is staging or prod. To use Cognito or
 another OIDC provider, replace `resolve_user` in
-[deps.py](backend/app/api/deps.py) — it is the only place identity is read.
+[deps.py](backend/app/api/deps.py). It is the only place identity is read.
 
 ---
 
@@ -670,11 +670,11 @@ Every knob is an environment variable; see [.env.example](.env.example).
 |---|---|---|
 | `GENERATION_MODEL` | `gpt-5.6-luna` | **Verify against your account's model list.** |
 | `EMBEDDING_MODEL` | `tongyi-embedding-vision-flash` | |
-| `EMBEDDING_DIM` | `1024` | Must match the model's output — see below. |
+| `EMBEDDING_DIM` | `1024` | Must match the model's output; see below. |
 | `RERANK_MODEL` | `qwen3-rerank` | |
 | `DASHSCOPE_BASE_URL` | `https://dashscope-intl.aliyuncs.com` | Use `dashscope.aliyuncs.com` inside mainland China. |
 | `WEB_SEARCH_PROVIDER` | `openai` | `openai` (model's built-in), `tavily`, `serper`, `none`. |
-| `OPENAI_WEB_SEARCH_TOOL` | `web_search` | Hosted tool type — providers rename this between releases. |
+| `OPENAI_WEB_SEARCH_TOOL` | `web_search` | Hosted tool type; providers rename this between releases. |
 | `MODEL_CONTEXT_WINDOW` | `200000` | Drives the whole context budget. |
 | `AGENT_MAX_STEPS` | `6` | Tool rounds before a final answer is forced. |
 | `AUTH_MODE` | `jwt` | `header` is local-dev only and refused in prod. |
@@ -703,7 +703,7 @@ Then `make revision m="resize embedding"`, `make migrate`, and re-upload.
 | Method | Path | Purpose |
 |---|---|---|
 | `POST` | `/api/chat` | Stream a turn (SSE) |
-| `POST` | `/api/search` | Retrieval only — for judging relevance without spending generation tokens |
+| `POST` | `/api/search` | Retrieval only, for judging relevance without spending generation tokens |
 | `GET` `POST` | `/api/conversations` | List / create |
 | `GET` `PATCH` `DELETE` | `/api/conversations/{id}` | Load, rename, delete |
 | `POST` | `/api/documents` | Upload; ingestion runs asynchronously |
@@ -752,22 +752,22 @@ flowchart LR
 ```
 
 The schema must be ahead of the code, so migrations run first and **abort the
-deploy on failure**. The worker runs the same image and rolls alongside the API —
-otherwise it keeps executing the previous release against the new schema. Assets
-sync before `index.html` so a client never sees new HTML pointing at assets that
-do not exist yet.
+deploy on failure**. The worker runs the same image and rolls alongside the API,
+since otherwise it would keep executing the previous release against the new
+schema. Assets sync before `index.html` so a client never sees new HTML pointing
+at assets that do not exist yet.
 
 ### What gets created
 
-- **VPC** across 2 AZs — public subnets for the ALB, private for tasks and RDS, S3 gateway endpoint so upload traffic skips the NAT
-- **RDS PostgreSQL 16** — gp3, encrypted, automated backups, Performance Insights, slow-query logging at 1s
-- **ECS Fargate** — API autoscaling on CPU *and* requests-per-target (a streaming turn holds a connection open, so CPU alone under-reports load); worker autoscaling on queue depth per worker
-- **SQS** — ingestion queue with a dead-letter queue after 3 attempts
-- **ALB** — 600s idle timeout, rejects anything lacking the CloudFront-injected header
-- **CloudFront** — static cached, `/api/*` pass-through with compression disabled
-- **S3** — separate private buckets for uploads and web assets
-- **Secrets Manager** — DSN, API keys, and a Terraform-generated JWT secret
-- **CloudWatch** — dashboard plus alarms on API 5xx, unhealthy targets, p95 latency, RDS CPU / storage / connections, DLQ depth, ingestion backlog age
+- **VPC** across 2 AZs: public subnets for the ALB, private for tasks and RDS, S3 gateway endpoint so upload traffic skips the NAT
+- **RDS PostgreSQL 16**: gp3, encrypted, automated backups, Performance Insights, slow-query logging at 1s
+- **ECS Fargate**: API autoscaling on CPU *and* requests-per-target (a streaming turn holds a connection open, so CPU alone under-reports load); worker autoscaling on queue depth per worker
+- **SQS**: ingestion queue with a dead-letter queue after 3 attempts
+- **ALB**: 600s idle timeout, rejects anything lacking the CloudFront-injected header
+- **CloudFront**: static cached, `/api/*` pass-through with compression disabled
+- **S3**: separate private buckets for uploads and web assets
+- **Secrets Manager**: DSN, API keys, and a Terraform-generated JWT secret
+- **CloudWatch**: dashboard plus alarms on API 5xx, unhealthy targets, p95 latency, RDS CPU / storage / connections, DLQ depth, ingestion backlog age
 
 ### Ingestion: inline or queued
 
@@ -775,13 +775,13 @@ do not exist yet.
 `INGESTION_MODE=sqs` hands them to the worker service.
 
 - **Delivery is at-least-once**, which is safe because `ingest_document` *replaces*
-  a document's chunks rather than appending — reprocessing converges instead of
+  a document's chunks rather than appending; reprocessing converges instead of
   duplicating passages.
 - **The worker heartbeats** the message visibility timeout while a long document
   is in flight, so a slow file is not redelivered to a second worker.
 - **A failed enqueue degrades to inline** rather than rejecting the upload. A
   queue outage costs throughput, not documents.
-- **Autoscaling tracks queue depth per worker, not CPU** — a worker blocked on
+- **Autoscaling tracks queue depth per worker, not CPU**: a worker blocked on
   the embedding provider is idle but very much busy.
 - **Anything reaching the DLQ raises an alarm.** Those are documents a user
   uploaded and will never get an answer from.
@@ -806,12 +806,12 @@ make test
 cd frontend && npm test
 ```
 
-**Backend (66 tests)** — chunk-boundary and overlap behaviour, RRF ranking,
+**Backend (132 tests)**: chunk-boundary and overlap behaviour, RRF ranking,
 context-budget enforcement and priority order, tool-call reassembly across
 stream chunks, password and token semantics, queue message handling, email link
 generation.
 
-**Frontend (10 tests)** — the SSE parser: frames split mid-JSON across network
+**Frontend (10 tests)**: the SSE parser: frames split mid-JSON across network
 chunks, several frames in one chunk, heartbeats, CRLF from a proxy, malformed
 frames, and rate-limit responses.
 
@@ -825,7 +825,7 @@ frames, and rate-limit responses.
 | terraform | `fmt -check`, `validate` |
 
 The drift check runs `alembic revision --autogenerate` and fails if it produces
-any operations — that is how a model change with no migration is caught before a
+any operations. That is how a model change with no migration is caught before a
 deploy rather than after. It identifies the generated file by diffing the
 directory listing and arms its cleanup trap *before* running alembic, because a
 post-write hook that fails after writing leaves a stray revision that becomes
@@ -841,7 +841,7 @@ whether the system survives a provider outage, and where it breaks under load.
 ### Eval harness
 
 A golden dataset of questions with what a correct answer must contain, scored
-on retrieval and generation **separately** — retrieval is the ceiling, and
+on retrieval and generation **separately**: retrieval is the ceiling, and
 grading them together hides which half regressed.
 
 ```bash
@@ -862,11 +862,11 @@ make eval u=you@example.com
 | `precision@k` | How much of the top k is worth the context budget? |
 | `MRR` | How far down before the first relevant hit? |
 | `nDCG@k` | Rank-discounted, normalised against the best achievable ordering. |
-| `groundedness` | Is every claim supported by the retrieved passages? An answer that is *true but unsupported* scores low — it means the model answered from memory and the citation is decoration. |
+| `groundedness` | Is every claim supported by the retrieved passages? An answer that is *true but unsupported* scores low: it means the model answered from memory and the citation is decoration. |
 | `citation_accuracy` | Do the `[n]` markers point at passages that actually support the sentence? |
 | `refusal_accuracy` | On questions the corpus cannot answer, did it say so instead of inventing one? |
 
-Expectations are **filenames and text snippets, not chunk IDs** — so a dataset
+Expectations are **filenames and text snippets, not chunk IDs**, so a dataset
 survives a chunker change, which is exactly when you most need it valid.
 
 Catch regressions against a saved run:
@@ -881,14 +881,14 @@ the correct answer.
 
 ### Resilience
 
-**Circuit breakers**, one per provider — embeddings failing must not take down
+**Circuit breakers**, one per provider: embeddings failing must not take down
 generation. After N consecutive failures the breaker opens and calls fail fast
 instead of queueing into a dead dependency; it probes after a recovery window
 and needs two successes to close, so one lucky probe cannot reopen the
 floodgates. Rate limits count as *success*: 429 is the provider working, and
 tripping on it would take generation down during a traffic spike.
 
-Open breakers surface in `/api/health/ready`, which reports `degraded` — a
+Open breakers surface in `/api/health/ready`, which reports `degraded`. A
 provider being down is a real degradation even when every container is "up".
 
 **Turn budgets** bound tokens, wall-clock, tool calls, and steps together. A
