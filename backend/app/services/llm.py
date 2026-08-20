@@ -16,8 +16,11 @@ from typing import Any, Literal
 from openai import APIError, APIStatusError, AsyncOpenAI, RateLimitError
 
 from app.config import settings
+from app.services.resilience import CircuitOpen, get_breaker
 
 logger = logging.getLogger(__name__)
+
+GENERATION_BREAKER = "generation"
 
 _client: AsyncOpenAI | None = None
 
@@ -134,6 +137,14 @@ async def stream_chat(
     accumulator = _ToolCallAccumulator()
     finish_reason: str | None = None
 
+    # Gate on entry and report the outcome below: a streaming generator
+    # outlives the call that created it, so breaker.call() cannot wrap it.
+    breaker = get_breaker(GENERATION_BREAKER)
+    try:
+        await breaker.acquire()
+    except CircuitOpen as exc:
+        raise RuntimeError(str(exc)) from exc
+
     try:
         stream = await client.chat.completions.create(**kwargs)
         async for chunk in stream:
@@ -158,11 +169,22 @@ async def stream_chat(
             if choice.finish_reason:
                 finish_reason = choice.finish_reason
     except RateLimitError as exc:
+        # Rate limiting is the provider working, not failing — tripping the
+        # breaker on it would take generation down during a traffic spike.
+        await breaker.record_success()
         raise RuntimeError("Generation model rate limit reached. Please retry shortly.") from exc
     except APIStatusError as exc:
+        # 4xx is our bad request; only 5xx counts against the provider.
+        if exc.status_code >= 500:
+            await breaker.record_failure()
+        else:
+            await breaker.record_success()
         raise RuntimeError(f"Generation model error ({exc.status_code}): {exc.message}") from exc
     except APIError as exc:
+        await breaker.record_failure()
         raise RuntimeError(f"Generation model error: {exc}") from exc
+
+    await breaker.record_success()
 
     if accumulator:
         yield StreamEvent(type="tool_calls", tool_calls=accumulator.finalize())
@@ -366,6 +388,14 @@ async def stream_responses(
     usage: dict[str, int] = {}
     finish_reason: str | None = None
 
+    # Gate on entry and report the outcome below: a streaming generator
+    # outlives the call that created it, so breaker.call() cannot wrap it.
+    breaker = get_breaker(GENERATION_BREAKER)
+    try:
+        await breaker.acquire()
+    except CircuitOpen as exc:
+        raise RuntimeError(str(exc)) from exc
+
     try:
         stream = await client.responses.create(**kwargs)
 
@@ -435,6 +465,9 @@ async def stream_responses(
                 raise RuntimeError(f"Generation failed: {message}")
 
     except RateLimitError as exc:
+        # Rate limiting is the provider working, not failing — tripping the
+        # breaker on it would take generation down during a traffic spike.
+        await breaker.record_success()
         raise RuntimeError("Generation model rate limit reached. Please retry shortly.") from exc
     except APIStatusError as exc:
         detail = getattr(exc, "message", str(exc))
@@ -446,9 +479,16 @@ async def stream_responses(
                 f"'{settings.openai_web_search_tool}' — or set "
                 "WEB_SEARCH_PROVIDER=tavily to use an external provider."
             ) from exc
+        if exc.status_code >= 500:
+            await breaker.record_failure()
+        else:
+            await breaker.record_success()
         raise RuntimeError(f"Generation model error ({exc.status_code}): {detail}") from exc
     except APIError as exc:
+        await breaker.record_failure()
         raise RuntimeError(f"Generation model error: {exc}") from exc
+
+    await breaker.record_success()
 
     if citations:
         yield StreamEvent(type="citations", citations=list(citations.values()))

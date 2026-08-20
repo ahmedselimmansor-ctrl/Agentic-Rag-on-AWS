@@ -72,6 +72,13 @@ class RetrievedChunk:
         }
 
 
+# CAST(:p AS t) rather than :p::t throughout. SQLAlchemy's text() bind-param
+# regex ends with a (?!:) lookahead, so a parameter followed by a colon is not
+# substituted at all — the literal ":qvec::vector" reaches Postgres and raises a
+# syntax error, which the caller's except clause then hides as a degraded
+# sparse-only search.
+
+
 def _vector_literal(vector: list[float]) -> str:
     """pgvector accepts a bracketed text literal; safer than driver array binding."""
     return "[" + ",".join(f"{v:.7g}" for v in vector) + "]"
@@ -80,22 +87,22 @@ def _vector_literal(vector: list[float]) -> str:
 _SCOPE_SQL = """
   AND c.user_id = :user_id
   AND (
-        :conversation_id::uuid IS NULL
+        CAST(:conversation_id AS uuid) IS NULL
         OR c.conversation_id IS NULL
-        OR c.conversation_id = :conversation_id::uuid
+        OR c.conversation_id = CAST(:conversation_id AS uuid)
       )
 """
 
 DENSE_SQL = f"""
 SELECT c.id, c.document_id, d.filename, c.content, c.context_header, c.ordinal,
        c.page_from, c.page_to, c.modality, c.metadata_json,
-       (c.embedding <=> :qvec::vector) AS distance
+       (c.embedding <=> CAST(:qvec AS vector)) AS distance
 FROM chunks c
 JOIN documents d ON d.id = c.document_id
 WHERE c.embedding IS NOT NULL
   AND d.status = 'ready'
   {_SCOPE_SQL}
-ORDER BY c.embedding <=> :qvec::vector
+ORDER BY c.embedding <=> CAST(:qvec AS vector)
 LIMIT :k
 """
 

@@ -12,6 +12,7 @@ from dataclasses import dataclass
 
 from app.config import settings
 from app.services.http import UpstreamError, post_json
+from app.services.resilience import CircuitOpen, get_breaker
 
 logger = logging.getLogger(__name__)
 
@@ -59,8 +60,10 @@ async def rerank(
     }
 
     try:
-        data = await post_json(url, service="dashscope-rerank", headers=_headers(), json_body=payload)
-    except (UpstreamError, RuntimeError) as exc:
+        data = await get_breaker("rerank").call(
+            post_json, url, service="dashscope-rerank", headers=_headers(), json_body=payload
+        )
+    except (UpstreamError, RuntimeError, CircuitOpen) as exc:
         logger.warning("rerank unavailable, falling back to fusion order: %s", exc)
         return [RerankResult(index=i, score=0.0) for i in range(n)]
 

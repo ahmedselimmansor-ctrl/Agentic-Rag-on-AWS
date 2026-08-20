@@ -14,6 +14,7 @@ from sqlalchemy import text
 from app.api.deps import DbSession
 from app.config import settings
 from app.schemas.chat import HealthOut
+from app.services.resilience import breaker_health
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/health", tags=["health"])
@@ -64,7 +65,20 @@ async def ready(session: DbSession) -> HealthOut:
     checks["embedding_model"] = f"{settings.embedding_model} (dim={settings.embedding_dim})"
     checks["rerank_model"] = settings.rerank_model
 
-    healthy = db_ok and pgvector_ok and settings.openai_api_key and settings.dashscope_api_key
+    # An open breaker means a provider is failing even though every component
+    # is technically "up" — report it rather than claiming health.
+    breakers = breaker_health()
+    open_circuits = [name for name, b in breakers.items() if b["state"] != "closed"]
+    for name, b in breakers.items():
+        checks[f"circuit:{name}"] = b["state"]
+
+    healthy = (
+        db_ok
+        and pgvector_ok
+        and settings.openai_api_key
+        and settings.dashscope_api_key
+        and not open_circuits
+    )
 
     return HealthOut(
         status="ok" if healthy else "degraded",

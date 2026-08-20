@@ -17,6 +17,7 @@ from pathlib import Path
 
 from app.config import settings
 from app.services.http import UpstreamError, post_json
+from app.services.resilience import get_breaker
 
 logger = logging.getLogger(__name__)
 
@@ -83,6 +84,12 @@ async def embed(inputs: list[EmbedInput]) -> list[list[float]]:
 
 
 async def _embed_batch(batch: list[EmbedInput]) -> list[list[float]]:
+    """Guarded by a breaker: embedding failures are the one thing that stops
+    both ingestion and retrieval, so hammering a dead provider is expensive."""
+    return await get_breaker("embeddings").call(_embed_batch_uncached, batch)
+
+
+async def _embed_batch_uncached(batch: list[EmbedInput]) -> list[list[float]]:
     url = settings.dashscope_base_url.rstrip("/") + MULTIMODAL_PATH
     payload = {
         "model": settings.embedding_model,

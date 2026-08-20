@@ -35,6 +35,7 @@ from app.config import settings
 from app.services import memory as memory_service
 from app.services.context import build_messages
 from app.services.llm import Citation, ToolCall, complete, stream_chat, stream_responses
+from app.services.resilience import TurnBudget
 from app.services.retrieval import retrieve as retrieve_chunks
 from app.tools import registry
 
@@ -52,17 +53,20 @@ class Emitter:
             await self._queue.put({"event": event, **data})
 
 
-def _ctx(config: RunnableConfig) -> tuple[AsyncSession, Emitter]:
+def _ctx(config: RunnableConfig) -> tuple[AsyncSession, Emitter, TurnBudget]:
     configurable = (config or {}).get("configurable", {})
     session = configurable.get("session")
     if session is None:
         raise RuntimeError("graph config must provide a database session")
-    return session, Emitter(configurable.get("queue"))
+    # An unbudgeted turn is still bounded by agent_max_steps; the budget adds
+    # token and wall-clock ceilings a step count cannot express.
+    budget = configurable.get("budget") or TurnBudget(max_steps=settings.agent_max_steps)
+    return session, Emitter(configurable.get("queue")), budget
 
 
 # ================================================================ prepare ===
 async def prepare(state: AgentState, config: RunnableConfig) -> dict:
-    session, emitter = _ctx(config)
+    session, emitter, budget = _ctx(config)
     await emitter.emit("status", label="Reading conversation")
 
     short_term = await memory_service.load_short_term(session, state["conversation_id"])
@@ -116,7 +120,7 @@ async def _rewrite_query(question: str, history: list) -> str:
 
 # =============================================================== retrieve ===
 async def retrieve_node(state: AgentState, config: RunnableConfig) -> dict:
-    session, emitter = _ctx(config)
+    session, emitter, budget = _ctx(config)
     query = state.get("search_query") or state["question"]
     await emitter.emit("status", label="Searching documents")
 
@@ -145,7 +149,7 @@ async def retrieve_node(state: AgentState, config: RunnableConfig) -> dict:
 
 # =============================================================== generate ===
 async def generate(state: AgentState, config: RunnableConfig) -> dict:
-    session, emitter = _ctx(config)
+    session, emitter, budget = _ctx(config)
 
     messages = state.get("llm_messages") or []
     sources = state.get("sources") or []
@@ -171,8 +175,14 @@ async def generate(state: AgentState, config: RunnableConfig) -> dict:
     tools = registry.available_tools(
         web_enabled=bool(state.get("web_enabled")), has_documents=has_documents
     )
-    # Out of steps: force a final answer by withholding the tools.
-    if state.get("step", 0) >= settings.agent_max_steps:
+    # Out of budget: force a final answer by withholding the tools. Stopping
+    # this way yields a real answer from what we already have, rather than an
+    # error the user has to read.
+    budget.steps_used = state.get("step", 0)
+    exhausted = budget.exhausted()
+    if exhausted:
+        logger.info("turn hit its %s budget; forcing a final answer", exhausted)
+        await emitter.emit("status", label="Wrapping up")
         tools = []
 
     # Native search runs inside the model's own turn, so it must be requested on
@@ -198,6 +208,9 @@ async def generate(state: AgentState, config: RunnableConfig) -> dict:
                 tool_calls = event.tool_calls
             elif event.type == "usage":
                 usage = event.usage
+                budget.add_tokens(
+                    usage.get("prompt_tokens", 0), usage.get("completion_tokens", 0)
+                )
             elif event.type == "hosted_tool":
                 # The model searched server-side; surface it in the same trace
                 # the UI already renders for tools we run ourselves.
@@ -264,10 +277,12 @@ def _append_citations(sources: list[dict], citations: list[Citation]) -> list[di
 
 # ================================================================== tools ===
 async def tools_node(state: AgentState, config: RunnableConfig) -> dict:
-    session, emitter = _ctx(config)
+    session, emitter, budget = _ctx(config)
     calls: list[ToolCall] = state.get("pending_tool_calls") or []
     if not calls:
         return {"pending_tool_calls": []}
+
+    budget.add_tool_calls(len(calls))
 
     for call in calls:
         await emitter.emit("tool_call", name=call.name, arguments=call.arguments)

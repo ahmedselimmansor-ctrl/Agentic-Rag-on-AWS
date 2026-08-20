@@ -31,8 +31,9 @@ SQLAlchemy + Alembic · ECS Fargate · Terraform
 9. [API](#api)
 10. [Deploy to AWS](#deploy-to-aws)
 11. [Tests and CI](#tests-and-ci)
-12. [Repository layout](#repository-layout)
-13. [Known gaps](#known-gaps)
+12. [Harnesses](#harnesses)
+13. [Repository layout](#repository-layout)
+14. [Known gaps](#known-gaps)
 
 ---
 
@@ -834,6 +835,90 @@ the new head.
 
 ---
 
+## Harnesses
+
+Three things unit tests cannot tell you: whether retrieval is any *good*,
+whether the system survives a provider outage, and where it breaks under load.
+
+### Eval harness
+
+A golden dataset of questions with what a correct answer must contain, scored
+on retrieval and generation **separately** — retrieval is the ceiling, and
+grading them together hides which half regressed.
+
+```bash
+make eval-check
+```
+
+```bash
+make eval-retrieval u=you@example.com
+```
+
+```bash
+make eval u=you@example.com
+```
+
+| Metric | Answers |
+|---|---|
+| `recall@k` | Did the relevant material make the top k at all? Nothing downstream can recover a passage retrieval never returned. |
+| `precision@k` | How much of the top k is worth the context budget? |
+| `MRR` | How far down before the first relevant hit? |
+| `nDCG@k` | Rank-discounted, normalised against the best achievable ordering. |
+| `groundedness` | Is every claim supported by the retrieved passages? An answer that is *true but unsupported* scores low — it means the model answered from memory and the citation is decoration. |
+| `citation_accuracy` | Do the `[n]` markers point at passages that actually support the sentence? |
+| `refusal_accuracy` | On questions the corpus cannot answer, did it say so instead of inventing one? |
+
+Expectations are **filenames and text snippets, not chunk IDs** — so a dataset
+survives a chunker change, which is exactly when you most need it valid.
+
+Catch regressions against a saved run:
+
+```bash
+python -m app.eval run d.yaml --user you@x.com --json today.json --baseline last-week.json --fail-on-regression
+```
+
+The example dataset shows every case shape, including the one most suites omit:
+an **unanswerable** question, where saying "the documents don't cover this" *is*
+the correct answer.
+
+### Resilience
+
+**Circuit breakers**, one per provider — embeddings failing must not take down
+generation. After N consecutive failures the breaker opens and calls fail fast
+instead of queueing into a dead dependency; it probes after a recovery window
+and needs two successes to close, so one lucky probe cannot reopen the
+floodgates. Rate limits count as *success*: 429 is the provider working, and
+tripping on it would take generation down during a traffic spike.
+
+Open breakers surface in `/api/health/ready`, which reports `degraded` — a
+provider being down is a real degradation even when every container is "up".
+
+**Turn budgets** bound tokens, wall-clock, tool calls, and steps together. A
+per-request timeout does not catch an agent making six individually-fast tool
+calls. On exhaustion the loop withholds tools and forces a final answer from
+what it already has, rather than surfacing an error.
+
+### Load
+
+```bash
+make bench-retrieval rows=100000
+```
+
+```bash
+python -m bench.bench_stream --url http://localhost:8000 --email you@x.com --password '...' --concurrency 20 --requests 100
+```
+
+```bash
+make bench-ingest f=/path/to/doc.pdf
+```
+
+Streaming reports time-to-first-token separately from total, because they fail
+differently: rising TTFT means the server saturates before generation starts;
+flat TTFT with rising total means the model is the bottleneck and adding tasks
+will not help.
+
+See [`backend/bench/README.md`](backend/bench/README.md).
+
 ## Repository layout
 
 ```
@@ -842,11 +927,13 @@ backend/
     agent/      LangGraph nodes, graph wiring, SSE runner, prompts
     api/        routes + dependencies (identity, quotas)
     db/         SQLAlchemy models and session
-    services/   parsing, chunking, embeddings, retrieval, rerank,
-                memory, context, auth, email, queue, ocr, storage
+    eval/       golden datasets, retrieval metrics, LLM-as-judge, CLI
+    services/   parsing, chunking, embeddings, retrieval, rerank, memory,
+                context, auth, email, queue, ocr, storage, resilience
     tools/      tool schemas, dispatch, web search
     worker.py   SQS ingestion worker
   alembic/      migrations
+  bench/        retrieval, streaming and ingestion benchmarks
   tests/
 frontend/
   src/

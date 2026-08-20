@@ -236,12 +236,12 @@ async def _find_near_duplicate(
         await session.execute(
             text(
                 """
-                SELECT id, (embedding <=> :qvec::vector) AS distance
+                SELECT id, (embedding <=> CAST(:qvec AS vector)) AS distance
                 FROM long_term_memories
                 WHERE user_id = :user_id
                   AND superseded_by IS NULL
                   AND embedding IS NOT NULL
-                ORDER BY embedding <=> :qvec::vector
+                ORDER BY embedding <=> CAST(:qvec AS vector)
                 LIMIT 1
                 """
             ),
@@ -277,7 +277,7 @@ async def recall_long_term(
                 WHERE user_id = :user_id
                   AND superseded_by IS NULL
                   AND embedding IS NOT NULL
-                ORDER BY (embedding <=> :qvec::vector) - (salience * 0.1)
+                ORDER BY (embedding <=> CAST(:qvec AS vector)) - (salience * 0.1)
                 LIMIT :limit
                 """
             ),

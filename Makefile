@@ -84,6 +84,37 @@ web-install: ## Install frontend dependencies
 web-build: ## Typecheck and build the frontend
 	cd $(FRONTEND) && npm run build
 
+# ------------------------------------------------------------ harnesses ----
+.PHONY: eval
+eval: ## Run the eval suite: make eval u=you@example.com [d=path/to.yaml]
+	@test -n "$(u)" || (echo 'Usage: make eval u=you@example.com' && exit 1)
+	$(COMPOSE) run --rm backend python -m app.eval run \
+	  $(or $(d),app/eval/datasets/example.yaml) --user $(u) -v
+
+.PHONY: eval-retrieval
+eval-retrieval: ## Retrieval metrics only — no generation, no judging, no model cost
+	@test -n "$(u)" || (echo 'Usage: make eval-retrieval u=you@example.com' && exit 1)
+	$(COMPOSE) run --rm backend python -m app.eval run \
+	  $(or $(d),app/eval/datasets/example.yaml) --user $(u) --retrieval-only -v
+
+.PHONY: eval-check
+eval-check: ## Validate a dataset without running it
+	$(COMPOSE) run --rm backend python -m app.eval check $(or $(d),app/eval/datasets/example.yaml)
+
+.PHONY: bench-retrieval
+bench-retrieval: ## pgvector latency: make bench-retrieval [rows=100000]
+	$(COMPOSE) run --rm backend python -m bench.bench_retrieval \
+	  --rows $(or $(rows),50000) --explain
+
+.PHONY: bench-clean
+bench-clean: ## Remove synthetic benchmark rows
+	$(COMPOSE) run --rm backend python -m bench.bench_retrieval --cleanup
+
+.PHONY: bench-ingest
+bench-ingest: ## Ingestion timing by stage: make bench-ingest f=/path/to/doc.pdf
+	@test -n "$(f)" || (echo 'Usage: make bench-ingest f=/path/to/doc.pdf' && exit 1)
+	$(COMPOSE) run --rm -v "$(f):/tmp/in" backend python -m bench.bench_ingest --file /tmp/in
+
 # ------------------------------------------------------------------- aws ----
 .PHONY: tf-init
 tf-init: ## terraform init

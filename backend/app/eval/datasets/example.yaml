@@ -1,0 +1,58 @@
+name: example
+description: >
+  A worked example showing every case shape. Replace these with questions about
+  your own corpus — an eval suite is only as useful as its resemblance to what
+  people actually ask.
+
+cases:
+  # --- retrieval only: cheapest signal, run this on every chunker change ----
+  - id: refund-window
+    question: How long do customers have to request a refund?
+    expect_documents: [policy.md]
+    expect_snippets:
+      - "within 30 days"
+    expect_facts:
+      - "Refunds may be requested within 30 days of purchase."
+    tags: [billing, smoke]
+
+  # --- a question whose answer lives under a heading, not in the body ------
+  # Catches regressions in heading-trail handling: the body text alone does not
+  # contain the word "enterprise".
+  - id: enterprise-notice-period
+    question: What notice is required to terminate an enterprise agreement?
+    expect_documents: [policy.md]
+    expect_snippets:
+      - "60 days written notice"
+    expect_facts:
+      - "Termination requires 60 days written notice."
+    tags: [billing]
+
+  # --- multi-document synthesis -------------------------------------------
+  - id: refund-vs-termination
+    question: How does the refund window differ from the enterprise termination notice?
+    expect_snippets:
+      - "within 30 days"
+      - "60 days written notice"
+    expect_facts:
+      - "The refund window is 30 days."
+      - "Enterprise termination needs 60 days notice."
+    tags: [synthesis]
+
+  # --- the case most suites omit and most systems fail --------------------
+  # There is no right answer in the corpus. Saying so IS the correct behaviour;
+  # inventing a number is the failure this case exists to catch.
+  - id: unanswerable-sla
+    question: What is the uptime SLA percentage guaranteed in the contract?
+    unanswerable: true
+    forbid:
+      - "any specific uptime percentage such as 99.9%"
+    tags: [refusal, smoke]
+
+  # --- a known past hallucination, pinned so it cannot come back ----------
+  - id: no-invented-fees
+    question: Is there a cancellation fee?
+    expect_documents: [policy.md]
+    forbid:
+      - "a specific cancellation fee amount"
+      - "a restocking fee"
+    tags: [regression]
