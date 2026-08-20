@@ -70,7 +70,6 @@ flowchart TB
 
     openai["OpenAI<br/>generation + built-in web search"]
     dashscope["Alibaba Model Studio<br/>embeddings + rerank"]
-    tavily["Tavily / Serper<br/>optional external search"]
 
     browser --> cf
     cf --> s3web
@@ -90,7 +89,6 @@ flowchart TB
     worker --> nat
     nat --> openai
     nat --> dashscope
-    nat -.-> tavily
 
     secrets -.-> api
     secrets -.-> worker
@@ -103,7 +101,7 @@ flowchart TB
     classDef ext fill:#fff4ec,stroke:#c4825b,color:#33251c
     classDef compute fill:#eefaf1,stroke:#5bb37c,color:#1c3325
     class s3web,s3up,db,secrets store
-    class openai,dashscope,tavily,ses,textract ext
+    class openai,dashscope,ses,textract ext
     class api,worker compute
 ```
 
